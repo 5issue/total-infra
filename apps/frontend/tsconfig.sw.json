@@ -1,0 +1,11 @@
+{
+  "//": "서비스 워커 전용 tsconfig. sw.ts 는 Next 모듈 그래프가 아니라 @serwist/turbopack 이 esbuild 로 별도 번들링하므로 lib/타입을 분리한다.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["esnext", "webworker"],
+    "types": [],
+    "plugins": []
+  },
+  "include": ["src/app/sw.ts"],
+  "exclude": ["node_modules"]
+}
