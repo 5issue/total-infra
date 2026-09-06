@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+/*
+ * Tailwind CSS v4 CSS-first. tailwind.config.js 를 만들지 않는다.
+ *
+ * @theme 네임스페이스가 "정식 유틸리티"를 생성한다:
+ *   --color-*  -> bg-*, text-*, border-*, ring-* ...
+ *   --radius-* -> rounded-*
+ *   --font-*   -> font-*
+ * ⚠️ rounded-[--radius-card] 대괄호 임의값 문법 금지. 생성 유틸리티(rounded-card)만.
+ *
+ * 다크 모드 (동작 구조만 세팅 — 실제 색상은 디자인 토큰 대기)
+ *  - 기본값: OS 설정(prefers-color-scheme).
+ *  - 명시 override: <html data-theme="dark"> / <html data-theme="light">.
+ *  - 시맨틱 색 토큰(--color-background 등)은 위 규칙에 따라 자동 전환.
+ *  - 실제 토글 UI(localStorage + inline head script)는 다음 단계.
+ */
+
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(
+        :root:not([data-theme="light"]),
+        :root:not([data-theme="light"]) *
+      ) {
+      @slot;
+    }
+  }
+}
+
+/*
+ * 정적 토큰 — 색상 아님(radius/font). 색상 팔레트(--color-brand, --color-price 등)는
+ * 디자인 파트에서 토큰 확정 후 여기에 추가한다. 지금은 정의하지 않는다.
+ */
+@theme {
+  --radius-card: 0.75rem;
+  --radius-button: 0.5rem;
+  --radius-pill: 9999px;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+}
+
+/*
+ * 테마 인식 색 토큰: @theme inline 으로 var() 를 그대로 유틸리티에 넣어
+ * 런타임 캐스케이드(:root vs [data-theme])로 값이 바뀌게 한다.
+ */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+}
+
+/*
+ * ⚠️ PLACEHOLDER — 디자인 토큰 확정 전 임시값. 순수 그레이스케일(대비 확보 목적)만 둔다.
+ *    브랜드색·시맨틱색(성공/경고/가격 등)은 여기 추가하지 말 것. 디자인 토큰으로 일괄 교체.
+ *    다크 값은 아래 두 블록(@media / [data-theme])에 동일하게 유지한다.
+ */
+:root {
+  color-scheme: light;
+
+  --background: #ffffff;
+  --foreground: #171717;
+  --surface: #ffffff;
+  --surface-muted: #f5f5f5;
+  --border: #e5e5e5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --background: #0a0a0a;
+    --foreground: #ededed;
+    --surface: #171717;
+    --surface-muted: #212121;
+    --border: #2e2e2e;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --surface: #171717;
+  --surface-muted: #212121;
+  --border: #2e2e2e;
+}
+
+html,
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+}
