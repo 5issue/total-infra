@@ -50,7 +50,7 @@ module "eks" {
     vpc-cni = {
       most_recent = true
       configuration_values = jsonencode({
-        enableNetworkPolicy = "true"
+        enableNetworkPolicy = "true" # VPC CNI NetworkPolicy 엔진 활성화됨
         env = {
           ENABLE_PREFIX_DELEGATION = "true"
           WARM_PREFIX_TARGET       = "1"
@@ -119,6 +119,13 @@ module "eks" {
         awk -F: '($3 < 1000 && $1 != "root" && $7 !~ /(nologin|false)/) {print $1}' /etc/passwd | while read -r user; do
             usermod -s /sbin/nologin "$user"
         done
+
+        # [U-12] 비활성 세션 자동 종료 (10분 = 600초 미입력 시 자동 로그아웃)
+        cat << 'EOF' > /etc/profile.d/timeout.sh
+        export TMOUT=600
+        readonly TMOUT
+        EOF
+        chmod 0644 /etc/profile.d/timeout.sh
 
         # [U-13] 패스워드 안전 암호화 저장 (yescrypt/sha512)
         if grep -q "^ENCRYPT_METHOD" /etc/login.defs; then

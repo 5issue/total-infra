@@ -3,6 +3,9 @@ SHELL := /bin/bash
 # 두 스택 모두 등록된 IAM 프로파일(596601390909 계정) 사용
 AWS_PROFILE := target-infra
 
+# AWS CLI 페이저(less) 비활성화 -> CLI 실행 시 멈춤 현상 원천 차단
+export AWS_PAGER :=
+
 .PHONY: iam-setup iam-plan iam iam-destroy base-plan base base-destroy init plan apply destroy
 
 # ----------------------------------------------------------------
@@ -100,14 +103,30 @@ apply:
 	cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform apply -auto-approve -var="alb_dns_name=$$ALB_HOSTNAME"
 
 # ----------------------------------------------------------------
-# 7. 전체 인프라 안전 파기 (Ingress/ALB 정리 -> Infra 파기 -> Init 파기)
+# 7. 전체 인프라 안전 파기 (Ingress/ALB 정리 -> Infra 파기)
 # ----------------------------------------------------------------
 destroy: # 삭제 전 반드시 alb 삭제할것: kubectl delete -f k8s/frontend/
 	@echo "=========================================================="
-	@echo " [1/4] K8s Ingress 리소스(Frontend & Backend) 선행 삭제"
+	@echo " [1/4] K8s Ingress 및 워크로드 안전 선행 삭제"
 	@echo "=========================================================="
-	-kubectl delete ingress --all -n frontend --ignore-not-found 2>/dev/null || true
-	-kubectl delete ingress --all -n backend --ignore-not-found 2>/dev/null || true
+	@echo "Ingress 리소스 삭제 신호 전달..."
+	-kubectl delete ingress --all -A --ignore-not-found --timeout=30s 2>/dev/null || true
+	
+	@echo "Argo CD Application 파이널라이저 해제 및 삭제..."
+	-kubectl get application -n argocd -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | xargs -r -n 1 kubectl patch application -n argocd -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true
+	-kubectl delete application --all -n argocd --timeout=20s 2>/dev/null || true
+
+	@echo "Ingress 파이널라이저 강제 해제..."
+	@for ns in frontend backend prometheus argocd; do \
+		for ing in $$(kubectl get ingress -n $$ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do \
+			kubectl patch ingress $$ing -n $$ns -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true; \
+		done \
+	done
+
+	@echo "네임스페이스 파이널라이저 사전 해제 (Terminating 고착 방지)..."
+	@for ns in frontend argocd prometheus; do \
+		kubectl get ns "$$ns" -o json 2>/dev/null | python3 -c 'import sys, json; data=json.load(sys.stdin); data["spec"]["finalizers"]=[]; print(json.dumps(data))' | kubectl replace --raw "/api/v1/namespaces/$$ns/finalize" -f - 2>/dev/null || true; \
+	done
 
 	@echo "=========================================================="
 	@echo " [2/4] Karpenter 스팟 노드 선행 반납 및 EC2 완전 종료 대기"
@@ -150,27 +169,28 @@ destroy: # 삭제 전 반드시 alb 삭제할것: kubectl delete -f k8s/frontend
 	@for tg in $$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-target-groups --region ap-northeast-2 --query "TargetGroups[?starts_with(TargetGroupName, 'k8s-')].TargetGroupArn" --output text 2>/dev/null); do \
 		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 delete-target-group --target-group-arn "$$tg" --region ap-northeast-2 2>/dev/null || true; \
 	done
-	@echo "k8s 동적 보안 그룹의 모든 인바운드/아웃바운드 규칙(상호참조) 강제 해제 및 삭제 진행..."
-	@K8S_SGS=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 describe-security-groups --region ap-northeast-2 --filters "Name=group-name,Values=k8s-*" --query "SecurityGroups[*].GroupId" --output text 2>/dev/null); \
-	if [ -n "$$K8S_SGS" ]; then \
-		echo "발견된 k8s 잔여 보안 그룹: $$K8S_SGS"; \
-		for sg in $$K8S_SGS; do \
-			INGRESS_RULES=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 describe-security-groups --region ap-northeast-2 --group-ids "$$sg" --query "SecurityGroups[0].IpPermissions" --output json 2>/dev/null); \
-			if [ "$$INGRESS_RULES" != "[]" ] && [ -n "$$INGRESS_RULES" ]; then \
-				export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 revoke-security-group-ingress --region ap-northeast-2 --group-id "$$sg" --ip-permissions "$$INGRESS_RULES" 2>/dev/null || true; \
-			fi; \
-			EGRESS_RULES=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 describe-security-groups --region ap-northeast-2 --group-ids "$$sg" --query "SecurityGroups[0].IpPermissionsEgress" --output json 2>/dev/null); \
-			if [ "$$EGRESS_RULES" != "[]" ] && [ -n "$$EGRESS_RULES" ]; then \
-				export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 revoke-security-group-egress --region ap-northeast-2 --group-id "$$sg" --ip-permissions "$$EGRESS_RULES" 2>/dev/null || true; \
-			fi; \
-		done; \
-		for sg in $$K8S_SGS; do \
-			echo "보안 그룹 삭제: $$sg"; \
-			export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 delete-security-group --region ap-northeast-2 --group-id "$$sg" 2>/dev/null || true; \
-		done; \
-		echo "k8s 보안 그룹 정리 완료!"; \
-	else \
-		echo "남아있는 k8s 보안 그룹이 없습니다."; \
+	
+	@echo "VPC 내의 모든 잔여 동적 보안 그룹(default 제외) 상호참조 해제 및 완전 삭제..."
+	@VPC_ID=$$(cd infra && terraform output -raw vpc_id 2>/dev/null || aws ec2 describe-vpcs --filters "Name=tag:Name,Values=*$(PROJECT_NAME)*" --query "Vpcs[0].VpcId" --output text --profile $(AWS_PROFILE) --region ap-northeast-2 2>/dev/null); \
+	if [ -n "$$VPC_ID" ] && [ "$$VPC_ID" != "None" ]; then \
+		VPC_SGS=$$(aws ec2 describe-security-groups --region ap-northeast-2 --profile $(AWS_PROFILE) --filters "Name=vpc-id,Values=$$VPC_ID" --query "SecurityGroups[?GroupName!='default'].GroupId" --output text 2>/dev/null); \
+		if [ -n "$$VPC_SGS" ]; then \
+			echo "정리 대상 VPC 보안 그룹: $$VPC_SGS"; \
+			for sg in $$VPC_SGS; do \
+				INGRESS=$$(aws ec2 describe-security-groups --region ap-northeast-2 --profile $(AWS_PROFILE) --group-ids "$$sg" --query "SecurityGroups[0].IpPermissions" --output json 2>/dev/null); \
+				if [ "$$INGRESS" != "[]" ] && [ -n "$$INGRESS" ]; then \
+					aws ec2 revoke-security-group-ingress --region ap-northeast-2 --profile $(AWS_PROFILE) --group-id "$$sg" --ip-permissions "$$INGRESS" 2>/dev/null || true; \
+				fi; \
+				EGRESS=$$(aws ec2 describe-security-groups --region ap-northeast-2 --profile $(AWS_PROFILE) --group-ids "$$sg" --query "SecurityGroups[0].IpPermissionsEgress" --output json 2>/dev/null); \
+				if [ "$$EGRESS" != "[]" ] && [ -n "$$EGRESS" ]; then \
+					aws ec2 revoke-security-group-egress --region ap-northeast-2 --profile $(AWS_PROFILE) --group-id "$$sg" --ip-permissions "$$EGRESS" 2>/dev/null || true; \
+				fi; \
+			done; \
+			for sg in $$VPC_SGS; do \
+				aws ec2 delete-security-group --region ap-northeast-2 --profile $(AWS_PROFILE) --group-id "$$sg" 2>/dev/null || true; \
+			done; \
+			echo "VPC 동적 보안 그룹 정리 완료!"; \
+		fi; \
 	fi
 
 	@echo "=========================================================="
