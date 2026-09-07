@@ -8,5 +8,9 @@ project_name = "kurly-food"
 # 최초 배포 시에는 빈칸으로 두고, ALB가 생성된 후 실제 DNS 주소를 여기에 적어줍니다.
 alb_dns_name = "k8s-mainalbgroup-42469d31ac-1663011484.ap-northeast-2.elb.amazonaws.com"
 
-argocd_github_client_secret = "YOUR_GITHUB_CLIENT_SECRET"
-argocd_server_secretkey     = "CHANGE_THIS_TO_RANDOM_32_CHAR_STRING"
+argocd_github_client_secret  = "YOUR_GITHUB_CLIENT_SECRET"
+argocd_server_secretkey      = "CHANGE_THIS_TO_RANDOM_32_CHAR_STRING"
+argocd_admin_password_hash   = "argocd_관리자_패스워드"
+
+grafana_github_client_secret = "YOUR_GITHUB_CLIENT_SECRET"
+grafana_admin_password       = "grafana_관리자_패스워드"

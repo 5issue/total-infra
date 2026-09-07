@@ -46,3 +46,22 @@ variable "argocd_server_secretkey" {
   description = "Argo CD session encryption secret key (32+ chars)"
   sensitive   = true
 }
+
+variable "argocd_admin_password_hash" {
+  description = "Bcrypt hash of Argo CD admin password"
+  type        = string
+  sensitive   = true
+}
+
+variable "grafana_github_client_secret" {
+  description = "GitHub OAuth Client Secret for Grafana"
+  type        = string
+  sensitive   = true
+}
+
+variable "grafana_admin_password" {
+  description = "Grafana admin password"
+  type        = string
+  sensitive   = true
+}
+
