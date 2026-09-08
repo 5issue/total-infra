@@ -39,8 +39,8 @@ resource "aws_ecr_repository" "repos" {
 
 # 최근 이미지 10개만 유지 (스토리지 비용 절감)
 resource "aws_ecr_lifecycle_policy" "repos_policy" {
-  for_each   = aws_ecr_repository.repos
-  repository = each.value.name
+  for_each   = toset(local.ecr_repositories)              
+  repository = aws_ecr_repository.repos[each.key].name    
 
   policy = jsonencode({
     rules = [

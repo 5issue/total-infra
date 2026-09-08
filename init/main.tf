@@ -8,6 +8,14 @@ terraform {
       version = ">= 5.75"
     }
   }
+
+  backend "s3" {
+    bucket         = "issue-tfstate-ap-northeast-2"
+    key            = "init/terraform.tfstate"       # init 전용 경로!
+    region         = "ap-northeast-2"
+    dynamodb_table = "issue-tfstate-locks"
+    encrypt        = true
+  }
 }
 
 provider "aws" {
