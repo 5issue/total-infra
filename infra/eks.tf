@@ -163,8 +163,25 @@ module "eks" {
         # [U-30] 기본 UMASK 022 명시 설정
         sed -i -E 's/UMASK\s+[0-9]+/UMASK 022/' /etc/login.defs || true
 
-        # [U-67] 주요 로그 파일 및 디렉터리 권한 정비
-        chmod -R go-w /var/log/ 2>/dev/null || true
+        # [U-34 ~ U-52] 불필요 및 취약 데몬/소켓 비활성화
+        # AL2023에 미설치되어 있으나, 감사 통과 및 예방 차원의 즉시 비활성화
+        systemctl disable --now finger.socket rsh.socket rlogin.socket rexec.socket \
+          echo-stream.socket echo-dgram.socket discard-stream.socket discard-dgram.socket \
+          daytime-stream.socket daytime-dgram.socket tftp.socket telnet.socket 2>/dev/null || true
+
+        # [U-48, U-53, U-55] SMTP / FTP 관련 서비스 정지 및 비활성화 (설치되어 있을 경우 대비)
+        systemctl disable --now postfix sendmail vsftpd proftpd 2>/dev/null || true
+
+        # FTP 계정이 존재할 경우 쉘 제한 (U-55 방어)
+        if id ftp &>/dev/null; then
+            usermod -s /sbin/nologin ftp || true
+        fi
+
+        # [U-67] 주요 로그 파일 소유권 및 상세 권한 보강
+        chown -R root:root /var/log/
+        find /var/log -type f -exec chmod go-w {} + 2>/dev/null || true
+        # 보안 감사 핵심 파일 640 적용
+        chmod 0640 /var/log/messages /var/log/secure /var/log/audit/audit.log 2>/dev/null || true
         
         echo "=== [Security Hardening] Complete ==="
       EOT
