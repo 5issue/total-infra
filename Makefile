@@ -2,6 +2,8 @@ SHELL := /bin/bash
 
 # 두 스택 모두 등록된 IAM 프로파일(596601390909 계정) 사용
 AWS_PROFILE := target-infra
+AWS_REGION   := ap-northeast-2
+CLUSTER_NAME := test-eks
 
 # AWS CLI 페이저(less) 비활성화 -> CLI 실행 시 멈춤 현상 원천 차단
 export AWS_PAGER :=
@@ -84,6 +86,12 @@ apply:
 	@echo " [1/3] 기본 인프라(VPC, EKS 등) 1차 프로비저닝"
 	@echo "=========================================================="
 	@cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform apply -auto-approve
+
+	@echo "=========================================================="
+	@echo " 최신 EKS 클러스터 접속 정보(kubeconfig) 동기화"
+	@echo "=========================================================="
+	@export AWS_PROFILE=$(AWS_PROFILE) && aws eks update-kubeconfig --region $(AWS_REGION) --name $(CLUSTER_NAME)
+
 
 	@echo "=========================================================="
 	@echo " [2/3] K8s Ingress 생성 및 ALB DNS 할당 대기 중..."
