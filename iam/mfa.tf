@@ -61,7 +61,9 @@ resource "aws_iam_policy" "enforce_mfa" {
           "iam:ListInstanceProfiles",
           "kms:*",
           "eks:*",
-          "ec2:*"
+          "ec2:*",
+          "s3:*",
+          "ssm:*"
         ]
         Resource = "*"
         Condition = {

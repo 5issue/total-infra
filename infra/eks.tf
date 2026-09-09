@@ -20,8 +20,59 @@ module "eks" {
   subnet_ids                               = [aws_subnet.private_2a.id, aws_subnet.private_2c.id]
   cluster_endpoint_public_access           = true
 
-  enable_cluster_creator_admin_permissions = true
+  # 1명만 독점하는 옵션 제거
+  enable_cluster_creator_admin_permissions = false
   enable_irsa                              = true
+
+  # 최초 생성 시 팀원 5명 전원에게 영구 출입증을 발급합니다.
+  access_entries = {
+    jongwon = {
+      principal_arn = "arn:aws:iam::596601390909:user/infra-jongwon"
+      policy_associations = {
+        admin = {
+          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+    youngheon = {
+      principal_arn = "arn:aws:iam::596601390909:user/infra-youngheon"
+      policy_associations = {
+        admin = {
+          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+    mingyu = {
+      principal_arn = "arn:aws:iam::596601390909:user/infra-mingyu"
+      policy_associations = {
+        admin = {
+          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+    jaehyeok = {
+      principal_arn = "arn:aws:iam::596601390909:user/infra-jaehyeok"
+      policy_associations = {
+        admin = {
+          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+    jiyoon = {
+      principal_arn = "arn:aws:iam::596601390909:user/infra-jiyoon"
+      policy_associations = {
+        admin = {
+          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+  }
+  
 
   # =========================================================================
   # [보안 요구사항] EKS Secrets KMS 암호화 활성화 및 권한 위임 명시
