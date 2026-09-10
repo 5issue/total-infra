@@ -4,29 +4,15 @@ set -euo pipefail
 TARGET_ACCOUNT_ID="596601390909"
 REGION="ap-northeast-2"
 PROFILE_NAME="target-infra"
-
-# 등록 대상 IAM 유저 목록
-ALLOWED_USERS=("infra-jaehyeok" "infra-jiyoon" "infra-jongwon" "infra-mingyu" "infra-youngheon")
+AUTOMATION_USER="mgmt-automation-user"
 
 echo "============================================================"
-echo " AWS IAM Credential Setup for Infra (${TARGET_ACCOUNT_ID})"
+echo " AWS Automation Credential Setup (${TARGET_ACCOUNT_ID})"
+echo " Target IAM User: ${AUTOMATION_USER}"
 echo "============================================================"
-echo "등록 가능한 IAM 유저:"
-for idx in "${!ALLOWED_USERS[@]}"; do
-  echo "  $((idx+1))) ${ALLOWED_USERS[$idx]}"
-done
-echo "------------------------------------------------------------"
 
-# 1. IAM 유저 선택
-read -rp "사용할 IAM 유저 번호를 선택하세요 (1-${#ALLOWED_USERS[@]}): " USER_CHOICE
-if ! [[ "$USER_CHOICE" =~ ^[1-5]$ ]]; then
-  echo "[ERROR] 올바른 번호를 입력하세요." >&2
-  exit 1
-fi
-SELECTED_USER="${ALLOWED_USERS[$((USER_CHOICE-1))]}"
-
-# 2. Access Key / Secret Key 입력 (보안상 화면 미출력)
-read -rp "AWS Access Key ID ($SELECTED_USER): " ACCESS_KEY
+# 1. mgmt 전용 Access Key / Secret Key 입력
+read -rp "AWS Access Key ID (${AUTOMATION_USER}): " ACCESS_KEY
 read -rsp "AWS Secret Access Key: " SECRET_KEY
 echo ""
 
@@ -35,14 +21,14 @@ if [[ -z "$ACCESS_KEY" || -z "$SECRET_KEY" ]]; then
   exit 1
 fi
 
-# 3. AWS CLI 프로파일 자동 등록
+# 2. AWS CLI 프로파일 등록
 echo "[INFO] AWS CLI 프로파일 '$PROFILE_NAME' 등록 중..."
 aws configure set aws_access_key_id "$ACCESS_KEY" --profile "$PROFILE_NAME"
 aws configure set aws_secret_access_key "$SECRET_KEY" --profile "$PROFILE_NAME"
 aws configure set region "$REGION" --profile "$PROFILE_NAME"
 aws configure set output json --profile "$PROFILE_NAME"
 
-# 4. STS로 인증 및 대상 계정/유저 검증
+# 3. STS 인증 및 계정/유저 검증
 echo "[INFO] STS Caller Identity 검증 중..."
 CALLER_JSON=$(aws sts get-caller-identity --profile "$PROFILE_NAME" 2>/dev/null || true)
 
@@ -60,10 +46,6 @@ if [[ "$CHECK_ACCOUNT" != "$TARGET_ACCOUNT_ID" ]]; then
 fi
 
 echo "[SUCCESS] 자격 증명 확인 완료: $CHECK_ARN"
-
-
 echo "============================================================"
-echo " 설정이 완료되었습니다."
-echo " 이제 init/ 및 infra/ 폴더에서 실행되는 terraform 명령어는"
-echo " 해당 IAM ($SELECTED_USER) 권한으로 자동 실행됩니다."
+echo " 설정 완료: 이제 Makefile의 배포 명령어가 ${AUTOMATION_USER} 권한으로 실행됩니다."
 echo "============================================================"
