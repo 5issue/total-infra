@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 
 # 두 스택 모두 등록된 IAM 프로파일(596601390909 계정) 사용
-AWS_PROFILE := target-infra
+AWS_PROFILE  := target-infra
 AWS_REGION   := ap-northeast-2
 CLUSTER_NAME := test-eks
 
