@@ -84,7 +84,7 @@ plan:
 apply:
 
 	@echo "=========================================================="
-	@echo "NAT 인스턴스 및 네트워크 선행 배포"
+	@echo " NAT 인스턴스 및 네트워크 선행 배포"
 	@echo "=========================================================="
 	@cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && \
 		terraform apply -target=aws_instance.nat_instance_2a -target=aws_instance.nat_instance_2c -auto-approve
@@ -173,38 +173,45 @@ destroy: # 삭제 전 반드시 alb 삭제할것: kubectl delete -f k8s/frontend
 	@echo "=========================================================="
 	@echo " [3/4] AWS ALB 및 Target Group 안전 반납 대기"
 	@echo "=========================================================="
-	@ALB_ARN=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-load-balancers --region ap-northeast-2 --query "LoadBalancers[?contains(LoadBalancerName, 'mainalbgroup') || contains(LoadBalancerName, 'k8s')].LoadBalancerArn" --output text 2>/dev/null | head -n 1); \
+	@ALB_ARN=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-load-balancers --region $(AWS_REGION) --query "LoadBalancers[?contains(LoadBalancerName, 'mainalbgroup') || contains(LoadBalancerName, 'k8s')].LoadBalancerArn" --output text 2>/dev/null | head -n 1); \
 	if [ "$$ALB_ARN" != "None" ] && [ -n "$$ALB_ARN" ]; then \
 		echo "ALB 삭제 및 ENI 반납 대기 중..."; \
-		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 delete-load-balancer --load-balancer-arn "$$ALB_ARN" --region ap-northeast-2 2>/dev/null || true; \
-		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 wait load-balancers-deleted --load-balancer-arns "$$ALB_ARN" --region ap-northeast-2; \
-		echo "ALB 완전 삭제 및 ENI 반납 확인 완료!"; \
+		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 delete-load-balancer --load-balancer-arn "$$ALB_ARN" --region $(AWS_REGION) 2>/dev/null || true; \
+		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 wait load-balancers-deleted --load-balancer-arns "$$ALB_ARN" --region $(AWS_REGION); \
+		echo "ALB 삭제 완료. 연결된 ELB ENI 완전 소멸 대기..."; \
+		while [ -n "$$(aws ec2 describe-network-interfaces --region $(AWS_REGION) --profile $(AWS_PROFILE) --filters 'Name=description,Values=*ELB*' --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text 2>/dev/null)" ]; do \
+			echo -n "."; \
+			sleep 5; \
+		done; \
+		echo "ELB ENI 정리 완료!"; \
 	else \
 		echo "정리할 잔여 ALB가 없습니다."; \
 	fi
 	@echo "잔여 Target Group 자동 정리 진행..."
-	@for tg in $$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-target-groups --region ap-northeast-2 --query "TargetGroups[?starts_with(TargetGroupName, 'k8s-')].TargetGroupArn" --output text 2>/dev/null); do \
-		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 delete-target-group --target-group-arn "$$tg" --region ap-northeast-2 2>/dev/null || true; \
+	@for tg in $$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-target-groups --region $(AWS_REGION) --query "TargetGroups[?starts_with(TargetGroupName, 'k8s-')].TargetGroupArn" --output text 2>/dev/null); do \
+		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 delete-target-group --target-group-arn "$$tg" --region $(AWS_REGION) 2>/dev/null || true; \
 	done
-	
-	@echo "VPC 내의 모든 잔여 동적 보안 그룹(default 제외) 상호참조 해제 및 완전 삭제..."
-	@VPC_ID=$$(cd infra && terraform output -raw vpc_id 2>/dev/null || aws ec2 describe-vpcs --filters "Name=tag:Name,Values=*$(PROJECT_NAME)*" --query "Vpcs[0].VpcId" --output text --profile $(AWS_PROFILE) --region ap-northeast-2 2>/dev/null); \
+
+	@echo "VPC 내 잔여 동적 보안 그룹(default 제외) 룰 철회 및 순차 삭제 대기..."
+	@VPC_ID=$$(cd infra && terraform output -raw vpc_id 2>/dev/null); \
 	if [ -n "$$VPC_ID" ] && [ "$$VPC_ID" != "None" ]; then \
-		VPC_SGS=$$(aws ec2 describe-security-groups --region ap-northeast-2 --profile $(AWS_PROFILE) --filters "Name=vpc-id,Values=$$VPC_ID" --query "SecurityGroups[?GroupName!='default'].GroupId" --output text 2>/dev/null); \
+		VPC_SGS=$$(aws ec2 describe-security-groups --region $(AWS_REGION) --profile $(AWS_PROFILE) --filters "Name=vpc-id,Values=$$VPC_ID" --query "SecurityGroups[?GroupName!='default'].GroupId" --output text 2>/dev/null); \
 		if [ -n "$$VPC_SGS" ]; then \
-			echo "정리 대상 VPC 보안 그룹: $$VPC_SGS"; \
 			for sg in $$VPC_SGS; do \
-				INGRESS=$$(aws ec2 describe-security-groups --region ap-northeast-2 --profile $(AWS_PROFILE) --group-ids "$$sg" --query "SecurityGroups[0].IpPermissions" --output json 2>/dev/null); \
+				INGRESS=$$(aws ec2 describe-security-groups --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-ids "$$sg" --query "SecurityGroups[0].IpPermissions" --output json 2>/dev/null); \
 				if [ "$$INGRESS" != "[]" ] && [ -n "$$INGRESS" ]; then \
-					aws ec2 revoke-security-group-ingress --region ap-northeast-2 --profile $(AWS_PROFILE) --group-id "$$sg" --ip-permissions "$$INGRESS" 2>/dev/null || true; \
+					aws ec2 revoke-security-group-ingress --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-id "$$sg" --ip-permissions "$$INGRESS" 2>/dev/null || true; \
 				fi; \
-				EGRESS=$$(aws ec2 describe-security-groups --region ap-northeast-2 --profile $(AWS_PROFILE) --group-ids "$$sg" --query "SecurityGroups[0].IpPermissionsEgress" --output json 2>/dev/null); \
+				EGRESS=$$(aws ec2 describe-security-groups --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-ids "$$sg" --query "SecurityGroups[0].IpPermissionsEgress" --output json 2>/dev/null); \
 				if [ "$$EGRESS" != "[]" ] && [ -n "$$EGRESS" ]; then \
-					aws ec2 revoke-security-group-egress --region ap-northeast-2 --profile $(AWS_PROFILE) --group-id "$$sg" --ip-permissions "$$EGRESS" 2>/dev/null || true; \
+					aws ec2 revoke-security-group-egress --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-id "$$sg" --ip-permissions "$$EGRESS" 2>/dev/null || true; \
 				fi; \
 			done; \
 			for sg in $$VPC_SGS; do \
-				aws ec2 delete-security-group --region ap-northeast-2 --profile $(AWS_PROFILE) --group-id "$$sg" 2>/dev/null || true; \
+				for attempt in {1..12}; do \
+					aws ec2 delete-security-group --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-id "$$sg" 2>/dev/null && break; \
+					sleep 5; \
+				done; \
 			done; \
 			echo "VPC 동적 보안 그룹 정리 완료!"; \
 		fi; \
