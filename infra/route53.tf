@@ -56,3 +56,13 @@ resource "aws_route53_record" "grafana" {
   ttl     = 300
   records = [var.alb_dns_name]
 }
+
+# dev.cloudyim.store -> ALB 직접 연결 (DAST 점검용)
+resource "aws_route53_record" "dev" {
+  count   = var.alb_dns_name != "" ? 1 : 0
+  zone_id = data.aws_route53_zone.main.zone_id
+  name    = "dev.${var.domain_name}"
+  type    = "CNAME"
+  ttl     = 300
+  records = [var.alb_dns_name]
+}
