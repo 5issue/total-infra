@@ -163,3 +163,32 @@ resource "kubernetes_secret_v1" "grafana_github_oauth" {
 
   type = "Opaque"
 }
+
+# ==============================================================================
+# dev (스테이징) 네임스페이스 및 Secret 배포
+# ==============================================================================
+
+# 1. dev 네임스페이스 선언
+resource "kubernetes_namespace_v1" "dev" {
+  depends_on = [module.eks]
+  metadata {
+    name = "dev"
+  }
+}
+
+# 2. dev 네임스페이스용 total-client-secret 배포
+resource "kubernetes_secret_v1" "dev_total_client_secret" {
+  depends_on = [module.eks, kubernetes_namespace_v1.dev]
+
+  metadata {
+    name      = "total-client-secret"
+    namespace = kubernetes_namespace_v1.dev.metadata[0].name
+  }
+
+  data = {
+    "client-id"     = local.client_creds["client-id"]
+    "client-secret" = local.client_creds["client-secret"]
+  }
+
+  type = "Opaque"
+}
