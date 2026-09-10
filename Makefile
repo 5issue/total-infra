@@ -82,6 +82,15 @@ plan:
 # 6. Infra 메인 스택 배포 (VPC/EKS -> Ingress 대기 -> CloudFront 연동)
 # ----------------------------------------------------------------
 apply:
+
+	@echo "=========================================================="
+	@echo "NAT 인스턴스 및 네트워크 선행 배포"
+	@echo "=========================================================="
+	@cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && \
+		terraform apply -target=aws_instance.nat_instance_2a -target=aws_instance.nat_instance_2c -auto-approve
+	@echo "NAT 인스턴스 부팅 및 iptables 포워딩 안정화 대기 (30초)..."
+	@sleep 30
+
 	@echo "=========================================================="
 	@echo " [1/3] 기본 인프라(VPC, EKS 등) 1차 프로비저닝"
 	@echo "=========================================================="

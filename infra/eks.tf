@@ -19,6 +19,7 @@ module "eks" {
   vpc_id                                   = aws_vpc.main.id
   subnet_ids                               = [aws_subnet.private_2a.id, aws_subnet.private_2c.id]
   cluster_endpoint_public_access           = true
+  cluster_endpoint_private_access          = true
 
   # 1명만 독점하는 옵션 제거
   enable_cluster_creator_admin_permissions = false
@@ -189,11 +190,11 @@ module "eks" {
         EOF
         chmod 0644 /etc/profile.d/timeout.sh
 
-        # [U-13] 패스워드 안전 암호화 저장 (yescrypt/sha512)
+        # [U-13] 패스워드 안전 암호화 저장 (감사 기준 가이드 준수: SHA512)
         if grep -q "^ENCRYPT_METHOD" /etc/login.defs; then
-            sed -i 's/^ENCRYPT_METHOD.*/ENCRYPT_METHOD YESCRYPT/' /etc/login.defs
+            sed -i 's/^ENCRYPT_METHOD.*/ENCRYPT_METHOD SHA512/' /etc/login.defs
         else
-            echo "ENCRYPT_METHOD YESCRYPT" >> /etc/login.defs
+            echo "ENCRYPT_METHOD SHA512" >> /etc/login.defs
         fi
 
         # [U-63] sudo 접근(/etc/sudoers) 권한 관리
@@ -231,10 +232,21 @@ module "eks" {
           echo-stream.socket echo-dgram.socket discard-stream.socket discard-dgram.socket \
           daytime-stream.socket daytime-dgram.socket tftp.socket telnet.socket 2>/dev/null || true
 
-        # [U-48, U-53, U-55] SMTP / FTP 관련 서비스 정지 및 비활성화 (설치되어 있을 경우 대비)
-        systemctl disable --now postfix sendmail vsftpd proftpd 2>/dev/null || true
+        # [U-48] SMTP 서비스 비활성화 및 VRFY 명령어 차단 설정 (U-48 대응)
+        systemctl disable --now postfix sendmail 2>/dev/null || true
+        if [ -f /etc/postfix/main.cf ]; then
+            grep -q "^disable_vrfy_command" /etc/postfix/main.cf && \
+              sed -i 's/^disable_vrfy_command.*/disable_vrfy_command = yes/' /etc/postfix/main.cf || \
+              echo "disable_vrfy_command = yes" >> /etc/postfix/main.cf
+        fi
 
-        # FTP 계정이 존재할 경우 쉘 제한 (U-55 방어)
+        # [U-53, U-55] FTP 서비스 비활성화, 배너 노출 제한 및 쉘 격리 (U-53, U-55 대응)
+        systemctl disable --now vsftpd proftpd 2>/dev/null || true
+        if [ -f /etc/vsftpd/vsftpd.conf ]; then
+            grep -q "^ftpd_banner" /etc/vsftpd/vsftpd.conf && \
+              sed -i 's/^ftpd_banner.*/ftpd_banner=Authorized Users Only/' /etc/vsftpd/vsftpd.conf || \
+              echo "ftpd_banner=Authorized Users Only" >> /etc/vsftpd/vsftpd.conf
+        fi
         if id ftp &>/dev/null; then
             usermod -s /sbin/nologin ftp || true
         fi
