@@ -119,13 +119,13 @@ apply:
 	cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform apply -auto-approve -var="alb_dns_name=$$ALB_HOSTNAME"
 
 # ----------------------------------------------------------------
-# 7. 전체 인프라 안전 파기 (순서 엄수: K8s 리소스 정리 -> 네임스페이스 -> 노드 -> ALB -> TF)
+# 7. 전체 인프라 안전 파기
 # ----------------------------------------------------------------
 destroy:
 	@echo "=========================================================="
-	@echo " [1/5] K8s Ingress, CRD 및 Application 파이널라이저 해제"
+	@echo " [1/5] K8s Ingress 및 Application 파이널라이저 안전 해제"
 	@echo "=========================================================="
-	@echo "Ingress 삭제..."
+	@echo "Ingress 삭제 신호 전달..."
 	-kubectl delete ingress --all -A --ignore-not-found --timeout=20s 2>/dev/null || true
 
 	@echo "Argo CD Application 파이널라이저 강제 해제 및 삭제..."
@@ -141,7 +141,7 @@ destroy:
 	done
 
 	@echo "=========================================================="
-	@echo " [2/5] K8s 네임스페이스 파이널라이저 사전 강제 제거 (고착 방지)"
+	@echo " [2/5] K8s 네임스페이스 파이널라이저 사전 강제 제거 (Terminating 방지)"
 	@echo "=========================================================="
 	@for ns in frontend backend dev argocd prometheus; do \
 		kubectl get ns "$$ns" -o json 2>/dev/null | \
@@ -150,62 +150,84 @@ destroy:
 	done
 
 	@echo "=========================================================="
-	@echo " [3/5] Karpenter 스팟 노드 및 잔여 EC2 종료"
+	@echo " [3/5] Karpenter 스팟 노드 정리 및 인스턴스 완전 종료 대기"
 	@echo "=========================================================="
 	-kubectl delete nodepools --all --timeout=20s 2>/dev/null || true
 	-kubectl delete nodeclaims --all --timeout=20s 2>/dev/null || true
 
 	@SPOT_IDS=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 describe-instances \
-		--region ap-northeast-2 \
+		--region $(AWS_REGION) \
 		--filters "Name=tag:karpenter.sh/nodepool,Values=*" "Name=instance-state-name,Values=pending,running,shutting-down,stopping,stopped" \
 		--query "Reservations[*].Instances[*].InstanceId" \
 		--output text 2>/dev/null); \
 	if [ -n "$$SPOT_IDS" ]; then \
-		echo "스팟 인스턴스 강제 종료: $$SPOT_IDS"; \
-		export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 terminate-instances --instance-ids $$SPOT_IDS --region ap-northeast-2 2>/dev/null || true; \
-		export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 wait instance-terminated --instance-ids $$SPOT_IDS --region ap-northeast-2; \
+		echo "스팟 인스턴스 종료 중: $$SPOT_IDS"; \
+		export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 terminate-instances --instance-ids $$SPOT_IDS --region $(AWS_REGION) 2>/dev/null || true; \
+		export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 wait instance-terminated --instance-ids $$SPOT_IDS --region $(AWS_REGION); \
 	fi
-	@sleep 10
+	@sleep 5
 
 	@echo "=========================================================="
-	@echo " [4/5] AWS ALB, Target Group 및 보안 그룹 사전 정리"
+	@echo " [4/5] AWS ALB, Target Group, ENI 및 k8s 동적 보안 그룹 강제 소멸"
 	@echo "=========================================================="
-	@ALB_ARN=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-load-balancers --region $(AWS_REGION) --query "LoadBalancers[?contains(LoadBalancerName, 'mainalbgroup') || contains(LoadBalancerName, 'k8s')].LoadBalancerArn" --output text 2>/dev/null | head -n 1); \
-	if [ "$$ALB_ARN" != "None" ] && [ -n "$$ALB_ARN" ]; then \
-		echo "ALB 삭제 진행: $$ALB_ARN"; \
-		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 delete-load-balancer --load-balancer-arn "$$ALB_ARN" --region $(AWS_REGION) 2>/dev/null || true; \
-		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 wait load-balancers-deleted --load-balancer-arns "$$ALB_ARN" --region $(AWS_REGION); \
-		echo "ALB 삭제 완료. 잔여 ELB ENI 소멸 대기..."; \
-		while [ -n "$$(aws ec2 describe-network-interfaces --region $(AWS_REGION) --profile $(AWS_PROFILE) --filters 'Name=description,Values=*ELB*' --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text 2>/dev/null)" ]; do \
-			echo -n "."; \
-			sleep 5; \
-		done; \
-		echo ""; \
-	fi
+	@for alb in $$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-load-balancers --region $(AWS_REGION) --query "LoadBalancers[?contains(LoadBalancerName, 'mainalbgroup') || contains(LoadBalancerName, 'k8s')].LoadBalancerArn" --output text 2>/dev/null); do \
+		echo "ALB 삭제: $$alb"; \
+		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 delete-load-balancer --load-balancer-arn "$$alb" --region $(AWS_REGION) 2>/dev/null || true; \
+		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 wait load-balancers-deleted --load-balancer-arns "$$alb" --region $(AWS_REGION); \
+	done
+	@echo "ALB 연결 ELB ENI 완전 소멸 대기..."
+	@while [ -n "$$(aws ec2 describe-network-interfaces --region $(AWS_REGION) --profile $(AWS_PROFILE) --filters 'Name=description,Values=*ELB*' --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text 2>/dev/null)" ]; do \
+		echo -n "."; \
+		sleep 5; \
+	done
+	@echo ""
+
 	@for tg in $$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-target-groups --region $(AWS_REGION) --query "TargetGroups[?starts_with(TargetGroupName, 'k8s-')].TargetGroupArn" --output text 2>/dev/null); do \
 		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 delete-target-group --target-group-arn "$$tg" --region $(AWS_REGION) 2>/dev/null || true; \
 	done
 
 	@VPC_ID=$$(cd infra && terraform output -raw vpc_id 2>/dev/null); \
+	if [ -z "$$VPC_ID" ] || [ "$$VPC_ID" = "None" ]; then \
+		VPC_ID=$$(aws ec2 describe-vpcs --region $(AWS_REGION) --profile $(AWS_PROFILE) --filters "Name=tag:Name,Values=*$(CLUSTER_NAME)*" "Name=tag:Name,Values=*vpc*" --query "Vpcs[0].VpcId" --output text 2>/dev/null); \
+	fi; \
 	if [ -n "$$VPC_ID" ] && [ "$$VPC_ID" != "None" ]; then \
-		VPC_SGS=$$(aws ec2 describe-security-groups --region $(AWS_REGION) --profile $(AWS_PROFILE) --filters "Name=vpc-id,Values=$$VPC_ID" --query "SecurityGroups[?GroupName!='default'].GroupId" --output text 2>/dev/null); \
-		if [ -n "$$VPC_SGS" ]; then \
-			for sg in $$VPC_SGS; do \
-				INGRESS=$$(aws ec2 describe-security-groups --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-ids "$$sg" --query "SecurityGroups[0].IpPermissions" --output json 2>/dev/null); \
-				if [ "$$INGRESS" != "[]" ] && [ -n "$$INGRESS" ]; then \
-					aws ec2 revoke-security-group-ingress --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-id "$$sg" --ip-permissions "$$INGRESS" 2>/dev/null || true; \
+		echo "타깃 VPC 확인: $$VPC_ID"; \
+		echo " VPC 내 잔여 ENI 강제 분리 및 제거..."; \
+		for eni in $$(aws ec2 describe-network-interfaces --region $(AWS_REGION) --profile $(AWS_PROFILE) --filters "Name=vpc-id,Values=$$VPC_ID" --query "NetworkInterfaces[*].NetworkInterfaceId" --output text 2>/dev/null); do \
+			attach_id=$$(aws ec2 describe-network-interfaces --region $(AWS_REGION) --profile $(AWS_PROFILE) --network-interface-ids "$$eni" --query "NetworkInterfaces[0].Attachment.AttachmentId" --output text 2>/dev/null); \
+			if [ "$$attach_id" != "None" ] && [ -n "$$attach_id" ]; then \
+				aws ec2 detach-network-interface --region $(AWS_REGION) --profile $(AWS_PROFILE) --attachment-id "$$attach_id" --force 2>/dev/null || true; \
+				sleep 2; \
+			fi; \
+			aws ec2 delete-network-interface --region $(AWS_REGION) --profile $(AWS_PROFILE) --network-interface-id "$$eni" 2>/dev/null || true; \
+		done; \
+		\
+		CUSTOM_SGS=$$(aws ec2 describe-security-groups --region $(AWS_REGION) --profile $(AWS_PROFILE) --filters "Name=vpc-id,Values=$$VPC_ID" --query "SecurityGroups[?GroupName!='default'].GroupId" --output text 2>/dev/null); \
+		if [ -n "$$CUSTOM_SGS" ]; then \
+			echo " k8s 동적 보안 그룹(default 제외) 규칙 전면 철회..."; \
+			for sg in $$CUSTOM_SGS; do \
+				IN_RULES=$$(aws ec2 describe-security-groups --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-ids "$$sg" --query "SecurityGroups[0].IpPermissions" --output json 2>/dev/null); \
+				if [ "$$IN_RULES" != "[]" ] && [ "$$IN_RULES" != "null" ]; then \
+					aws ec2 revoke-security-group-ingress --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-id "$$sg" --ip-permissions "$$IN_RULES" 2>/dev/null || true; \
 				fi; \
-				EGRESS=$$(aws ec2 describe-security-groups --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-ids "$$sg" --query "SecurityGroups[0].IpPermissionsEgress" --output json 2>/dev/null); \
-				if [ "$$EGRESS" != "[]" ] && [ -n "$$EGRESS" ]; then \
-					aws ec2 revoke-security-group-egress --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-id "$$sg" --ip-permissions "$$EGRESS" 2>/dev/null || true; \
+				OUT_RULES=$$(aws ec2 describe-security-groups --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-ids "$$sg" --query "SecurityGroups[0].IpPermissionsEgress" --output json 2>/dev/null); \
+				if [ "$$OUT_RULES" != "[]" ] && [ "$$OUT_RULES" != "null" ]; then \
+					aws ec2 revoke-security-group-egress --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-id "$$sg" --ip-permissions "$$OUT_RULES" 2>/dev/null || true; \
 				fi; \
 			done; \
-			for sg in $$VPC_SGS; do \
-				for attempt in {1..6}; do \
-					aws ec2 delete-security-group --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-id "$$sg" 2>/dev/null && break; \
-					sleep 3; \
+			sleep 3; \
+			echo " k8s 동적 보안 그룹 본체 삭제 재시도 루프..."; \
+			for attempt in {1..8}; do \
+				REMAINING_SGS=$$(aws ec2 describe-security-groups --region $(AWS_REGION) --profile $(AWS_PROFILE) --filters "Name=vpc-id,Values=$$VPC_ID" --query "SecurityGroups[?GroupName!='default'].GroupId" --output text 2>/dev/null); \
+				if [ -z "$$REMAINING_SGS" ]; then \
+					break; \
+				fi; \
+				for sg in $$REMAINING_SGS; do \
+					aws ec2 delete-security-group --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-id "$$sg" 2>/dev/null || true; \
 				done; \
+				sleep 3; \
 			done; \
+			echo "k8s 동적 보안 그룹 및 네트워크 인터페이스 정리 완료!"; \
 		fi; \
 	fi
 
