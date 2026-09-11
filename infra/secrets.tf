@@ -52,6 +52,13 @@ resource "kubernetes_namespace_v1" "frontend" {
   }
 }
 
+resource "kubernetes_namespace_v1" "backend" {
+  depends_on = [module.eks]
+  metadata {
+    name = "backend"
+  }
+}
+
 resource "kubernetes_namespace_v1" "argocd" {
   depends_on = [module.eks]
   metadata {
