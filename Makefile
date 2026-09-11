@@ -101,7 +101,6 @@ apply:
 	@echo "=========================================================="
 	@export AWS_PROFILE=$(AWS_PROFILE) && aws eks update-kubeconfig --region $(AWS_REGION) --name $(CLUSTER_NAME)
 
-
 	@echo "=========================================================="
 	@echo " [2/3] K8s Ingress 생성 및 ALB DNS 할당 대기 중..."
 	@echo "=========================================================="
@@ -120,79 +119,73 @@ apply:
 	cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform apply -auto-approve -var="alb_dns_name=$$ALB_HOSTNAME"
 
 # ----------------------------------------------------------------
-# 7. 전체 인프라 안전 파기 (Ingress/ALB 정리 -> Infra 파기)
+# 7. 전체 인프라 안전 파기 (순서 엄수: K8s 리소스 정리 -> 네임스페이스 -> 노드 -> ALB -> TF)
 # ----------------------------------------------------------------
-destroy: # 삭제 전 반드시 alb 삭제할것: kubectl delete -f k8s/frontend/
+destroy:
 	@echo "=========================================================="
-	@echo " [1/4] K8s Ingress 및 워크로드 안전 선행 삭제"
+	@echo " [1/5] K8s Ingress, CRD 및 Application 파이널라이저 해제"
 	@echo "=========================================================="
-	@echo "Ingress 리소스 삭제 신호 전달..."
-	-kubectl delete ingress --all -A --ignore-not-found --timeout=30s 2>/dev/null || true
-	
-	@echo "Argo CD Application 파이널라이저 해제 및 삭제..."
-	-kubectl get application -n argocd -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | xargs -r -n 1 kubectl patch application -n argocd -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true
-	-kubectl delete application --all -n argocd --timeout=20s 2>/dev/null || true
+	@echo "Ingress 삭제..."
+	-kubectl delete ingress --all -A --ignore-not-found --timeout=20s 2>/dev/null || true
+
+	@echo "Argo CD Application 파이널라이저 강제 해제 및 삭제..."
+	-kubectl get application -n argocd -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | \
+		xargs -r -n 1 kubectl patch application -n argocd -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true
+	-kubectl delete application --all -n argocd --ignore-not-found --timeout=20s 2>/dev/null || true
 
 	@echo "Ingress 파이널라이저 강제 해제..."
-	@for ns in frontend backend prometheus argocd; do \
+	@for ns in frontend backend dev prometheus argocd; do \
 		for ing in $$(kubectl get ingress -n $$ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do \
 			kubectl patch ingress $$ing -n $$ns -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true; \
 		done \
 	done
 
-	@echo "네임스페이스 파이널라이저 사전 해제 (Terminating 고착 방지)..."
-	@for ns in frontend argocd prometheus; do \
-		kubectl get ns "$$ns" -o json 2>/dev/null | python3 -c 'import sys, json; data=json.load(sys.stdin); data["spec"]["finalizers"]=[]; print(json.dumps(data))' | kubectl replace --raw "/api/v1/namespaces/$$ns/finalize" -f - 2>/dev/null || true; \
+	@echo "=========================================================="
+	@echo " [2/5] K8s 네임스페이스 파이널라이저 사전 강제 제거 (고착 방지)"
+	@echo "=========================================================="
+	@for ns in frontend backend dev argocd prometheus; do \
+		kubectl get ns "$$ns" -o json 2>/dev/null | \
+		python3 -c 'import sys, json; data=json.load(sys.stdin); data["spec"]["finalizers"]=[]; print(json.dumps(data))' | \
+		kubectl replace --raw "/api/v1/namespaces/$$ns/finalize" -f - 2>/dev/null || true; \
 	done
 
 	@echo "=========================================================="
-	@echo " [2/4] Karpenter 스팟 노드 선행 반납 및 EC2 완전 종료 대기"
+	@echo " [3/5] Karpenter 스팟 노드 및 잔여 EC2 종료"
 	@echo "=========================================================="
-	@echo "K8s 리소스 삭제 신호 전달..."
-	-kubectl delete nodepools --all --timeout=30s 2>/dev/null || true
-	-kubectl delete nodeclaims --all --timeout=30s 2>/dev/null || true
+	-kubectl delete nodepools --all --timeout=20s 2>/dev/null || true
+	-kubectl delete nodeclaims --all --timeout=20s 2>/dev/null || true
 
-	@echo "Karpenter가 띄운 실제 잔여 EC2 스팟 인스턴스 검색 및 강제 종료..."
 	@SPOT_IDS=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 describe-instances \
 		--region ap-northeast-2 \
 		--filters "Name=tag:karpenter.sh/nodepool,Values=*" "Name=instance-state-name,Values=pending,running,shutting-down,stopping,stopped" \
 		--query "Reservations[*].Instances[*].InstanceId" \
 		--output text 2>/dev/null); \
 	if [ -n "$$SPOT_IDS" ]; then \
-		echo "종료 대기/진행 중인 스팟 인스턴스 발견: $$SPOT_IDS"; \
+		echo "스팟 인스턴스 강제 종료: $$SPOT_IDS"; \
 		export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 terminate-instances --instance-ids $$SPOT_IDS --region ap-northeast-2 2>/dev/null || true; \
-		echo "AWS에서 인스턴스가 완전히 'terminated' 될 때까지 대기 중..."; \
 		export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 wait instance-terminated --instance-ids $$SPOT_IDS --region ap-northeast-2; \
-		echo "스팟 인스턴스 종료 및 ENI 반납 완료!"; \
-	else \
-		echo "남아있는 Karpenter 스팟 인스턴스가 없습니다."; \
 	fi
-	@echo "ENI 정리 안정화 대기 (15초)..."
-	@sleep 15
+	@sleep 10
 
 	@echo "=========================================================="
-	@echo " [3/4] AWS ALB 및 Target Group 안전 반납 대기"
+	@echo " [4/5] AWS ALB, Target Group 및 보안 그룹 사전 정리"
 	@echo "=========================================================="
 	@ALB_ARN=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-load-balancers --region $(AWS_REGION) --query "LoadBalancers[?contains(LoadBalancerName, 'mainalbgroup') || contains(LoadBalancerName, 'k8s')].LoadBalancerArn" --output text 2>/dev/null | head -n 1); \
 	if [ "$$ALB_ARN" != "None" ] && [ -n "$$ALB_ARN" ]; then \
-		echo "ALB 삭제 및 ENI 반납 대기 중..."; \
+		echo "ALB 삭제 진행: $$ALB_ARN"; \
 		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 delete-load-balancer --load-balancer-arn "$$ALB_ARN" --region $(AWS_REGION) 2>/dev/null || true; \
 		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 wait load-balancers-deleted --load-balancer-arns "$$ALB_ARN" --region $(AWS_REGION); \
-		echo "ALB 삭제 완료. 연결된 ELB ENI 완전 소멸 대기..."; \
+		echo "ALB 삭제 완료. 잔여 ELB ENI 소멸 대기..."; \
 		while [ -n "$$(aws ec2 describe-network-interfaces --region $(AWS_REGION) --profile $(AWS_PROFILE) --filters 'Name=description,Values=*ELB*' --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text 2>/dev/null)" ]; do \
 			echo -n "."; \
 			sleep 5; \
 		done; \
-		echo "ELB ENI 정리 완료!"; \
-	else \
-		echo "정리할 잔여 ALB가 없습니다."; \
+		echo ""; \
 	fi
-	@echo "잔여 Target Group 자동 정리 진행..."
 	@for tg in $$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-target-groups --region $(AWS_REGION) --query "TargetGroups[?starts_with(TargetGroupName, 'k8s-')].TargetGroupArn" --output text 2>/dev/null); do \
 		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 delete-target-group --target-group-arn "$$tg" --region $(AWS_REGION) 2>/dev/null || true; \
 	done
 
-	@echo "VPC 내 잔여 동적 보안 그룹(default 제외) 룰 철회 및 순차 삭제 대기..."
 	@VPC_ID=$$(cd infra && terraform output -raw vpc_id 2>/dev/null); \
 	if [ -n "$$VPC_ID" ] && [ "$$VPC_ID" != "None" ]; then \
 		VPC_SGS=$$(aws ec2 describe-security-groups --region $(AWS_REGION) --profile $(AWS_PROFILE) --filters "Name=vpc-id,Values=$$VPC_ID" --query "SecurityGroups[?GroupName!='default'].GroupId" --output text 2>/dev/null); \
@@ -208,17 +201,15 @@ destroy: # 삭제 전 반드시 alb 삭제할것: kubectl delete -f k8s/frontend
 				fi; \
 			done; \
 			for sg in $$VPC_SGS; do \
-				for attempt in {1..12}; do \
+				for attempt in {1..6}; do \
 					aws ec2 delete-security-group --region $(AWS_REGION) --profile $(AWS_PROFILE) --group-id "$$sg" 2>/dev/null && break; \
-					sleep 5; \
+					sleep 3; \
 				done; \
 			done; \
-			echo "VPC 동적 보안 그룹 정리 완료!"; \
 		fi; \
 	fi
 
 	@echo "=========================================================="
-	@echo " [4/4] Infra 메인 스택 Terraform Destroy 실행"
+	@echo " [5/5] Infra 메인 스택 Terraform Destroy 실행"
 	@echo "=========================================================="
 	@cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform destroy -auto-approve
-
