@@ -18,7 +18,6 @@ readonly KUBECTL_REQUEST_TIMEOUT="20s"
 
 readonly AWS_PROFILE="${AWS_PROFILE:-target-infra}"
 readonly AWS_REGION="${AWS_REGION:-$EXPECTED_AWS_REGION}"
-readonly AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-$EXPECTED_AWS_ACCOUNT_ID}"
 readonly EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-$EXPECTED_EKS_CLUSTER_NAME}"
 
 secret_payload=""
@@ -55,8 +54,6 @@ configure_aws_environment() {
 }
 
 validate_repository_contract() {
-  [[ "$AWS_ACCOUNT_ID" == "$EXPECTED_AWS_ACCOUNT_ID" ]] || \
-    die "AWS_ACCOUNT_ID가 repository 계약과 다릅니다."
   [[ "$AWS_REGION" == "$EXPECTED_AWS_REGION" ]] || \
     die "AWS_REGION이 repository 계약과 다릅니다."
   [[ "$EKS_CLUSTER_NAME" == "$EXPECTED_EKS_CLUSTER_NAME" ]] || \

@@ -3,7 +3,6 @@ SHELL := /bin/bash
 # 두 스택 모두 등록된 IAM 프로파일(596601390909 계정) 사용
 AWS_PROFILE  := target-infra
 AWS_REGION   := ap-northeast-2
-AWS_ACCOUNT_ID := 596601390909
 CLUSTER_NAME := test-eks
 
 # AWS CLI 페이저(less) 비활성화 -> CLI 실행 시 멈춤 현상 원천 차단
@@ -123,11 +122,11 @@ apply:
 # 7. RabbitMQ Application credential publication (독립 운영 작업)
 # ----------------------------------------------------------------
 rabbitmq-credential-publish:
-	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) AWS_ACCOUNT_ID=$(AWS_ACCOUNT_ID) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
 		./scripts/publish-rabbitmq-credentials.sh publish
 
 rabbitmq-credential-verify:
-	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) AWS_ACCOUNT_ID=$(AWS_ACCOUNT_ID) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
 		./scripts/publish-rabbitmq-credentials.sh verify
 
 # ----------------------------------------------------------------
