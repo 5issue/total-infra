@@ -211,3 +211,97 @@ resource "aws_s3_bucket_policy" "security_logs" {
     ]
   })
 }
+resource "aws_s3_bucket" "cnpg_backup" {
+  bucket        = "kurly-db-backup"
+  force_destroy = false
+
+  tags = {
+    Name        = "kurly-db-backup"
+    Environment = "prod"
+    ManagedBy   = "Terraform"
+    Database    = "cnpg-postgresql"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "cnpg_backup" {
+  bucket = aws_s3_bucket.cnpg_backup.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "cnpg_backup" {
+  bucket = aws_s3_bucket.cnpg_backup.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_ownership_controls" "cnpg_backup" {
+  bucket = aws_s3_bucket.cnpg_backup.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+resource "aws_s3_bucket_versioning" "cnpg_backup" {
+  bucket = aws_s3_bucket.cnpg_backup.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+
+resource "aws_s3_bucket" "mysql_backup" {
+  bucket        = "kurly-mysql-backup"
+  force_destroy = false
+
+  tags = {
+    Name        = "kurly-mysql-backup"
+    Environment = "prod"
+    ManagedBy   = "Terraform"
+    Database    = "moco-mysql"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "mysql_backup" {
+  bucket = aws_s3_bucket.mysql_backup.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "mysql_backup" {
+  bucket = aws_s3_bucket.mysql_backup.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_ownership_controls" "mysql_backup" {
+  bucket = aws_s3_bucket.mysql_backup.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+resource "aws_s3_bucket_versioning" "mysql_backup" {
+  bucket = aws_s3_bucket.mysql_backup.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
