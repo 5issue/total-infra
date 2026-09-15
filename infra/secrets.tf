@@ -42,6 +42,15 @@ resource "aws_secretsmanager_secret_version" "total_client_secret_val" {
   })
 }
 
+# RabbitMQ Secret container는 init stack에서 관리합니다.
+removed {
+  from = aws_secretsmanager_secret.rabbitmq_app_credentials
+
+  lifecycle {
+    destroy = false
+  }
+}
+
 # ==============================================================================
 # 2. Kubernetes Namespace & Secret 자동 배포
 # ==============================================================================
