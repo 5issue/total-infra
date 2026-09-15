@@ -42,22 +42,12 @@ resource "aws_secretsmanager_secret_version" "total_client_secret_val" {
   })
 }
 
-# ==============================================================================
-# RabbitMQ Application credential
-# ==============================================================================
+# RabbitMQ Secret container는 init stack에서 관리합니다.
+removed {
+  from = aws_secretsmanager_secret.rabbitmq_app_credentials
 
-# RabbitMQ Application credential용 Secrets Manager 리소스만 Terraform에서 관리합니다.
-# 실제 SecretVersion 생성·갱신과 Kubernetes Secret 배포는 Terraform 관리 범위에서 분리합니다.
-resource "aws_secretsmanager_secret" "rabbitmq_app_credentials" {
-  name                    = "prod/total/rabbitmq-app-credentials"
-  description             = "RabbitMQ total-backend application credentials for total-prod"
-  kms_key_id              = data.aws_kms_alias.secrets_cmk.target_key_arn
-  recovery_window_in_days = 7
-
-  tags = {
-    Environment = "prod"
-    ManagedBy   = "terraform"
-    Compliance  = "ISMS-P-2.7.2"
+  lifecycle {
+    destroy = false
   }
 }
 

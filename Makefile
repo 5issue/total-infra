@@ -39,24 +39,24 @@ iam-destroy:
 	@cd iam && export AWS_PROFILE=$(AWS_PROFILE) && terraform destroy -auto-approve
 
 # ----------------------------------------------------------------
-# 3. Init 스택 Plan & 배포 (S3, ECR, ACM 등 기반 리소스)
+# 3. Init 스택 Plan & 배포 (공통 기반 리소스)
 # ----------------------------------------------------------------
 base-plan:
 	@echo "=========================================================="
-	@echo " [Init] S3, ECR, ACM Plan 실행 (Profile: $(AWS_PROFILE))"
+	@echo " [Init] 공통 기반 리소스 Plan 실행 (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
 	@cd init && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform plan
 
 base:
 	@echo "=========================================================="
-	@echo " [Init] S3, ECR, ACM 배포 (Profile: $(AWS_PROFILE))"
+	@echo " [Init] 공통 기반 리소스 배포 (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
 	@cd init && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform apply -auto-approve
 
-# Init 스택 전용 파기 (S3, ECR, ACM 등 기반 리소스만 삭제)
+# Init 스택 전용 파기 (공통 기반 리소스 전체)
 base-destroy:
 	@echo "=========================================================="
-	@echo " [Init] S3, ECR, ACM 리소스 Destroy (Profile: $(AWS_PROFILE))"
+	@echo " [Init] 공통 기반 리소스 Destroy (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
 	@cd init && export AWS_PROFILE=$(AWS_PROFILE) && terraform destroy -auto-approve
 
