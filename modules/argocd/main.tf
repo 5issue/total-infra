@@ -1,6 +1,3 @@
-# ----------------------------------------------------------------
-# ArgoCD Helm 설치
-# ----------------------------------------------------------------
 resource "helm_release" "argocd" {
   name             = "argocd"
   repository       = "https://argoproj.github.io/argo-helm"
@@ -9,23 +6,23 @@ resource "helm_release" "argocd" {
   namespace        = "argocd"
   create_namespace = true
 
-  # GitHub OAuth 처리를 위한 Dex OAuth 기본 활성화 및 튜닝 설정
   values = [
     yamlencode({
       dex = {
         enabled = true
       }
+      configs = {
+        cm = {
+          "kustomize.buildOptions" = "--enable-helm"
+        }
+      }
     })
   ]
 
-  # 타임아웃 설정 (기본 300초->600초)
   timeout = 600
-  wait = false
+  wait    = false
 }
 
-# ----------------------------------------------------------------
-# Argo Rollouts Helm 설치 (Gateway API Traffic Router Plugin 포함)
-# ----------------------------------------------------------------
 resource "helm_release" "argo_rollouts" {
   name             = "argo-rollouts"
   repository       = "https://argoproj.github.io/argo-helm"
