@@ -199,3 +199,112 @@ resource "kubernetes_secret_v1" "dev_total_client_secret" {
 
   type = "Opaque"
 }
+
+locals {
+  db_service_accounts = toset([
+    "member_service", "auth_service", "order_service",
+    "payment_service", "oms_service",
+    "product_service", "wms_service", "scm_service"
+  ])
+}
+
+resource "random_password" "db_service_passwords" {
+  for_each         = local.db_service_accounts
+  length           = 12
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+  min_upper        = 1
+  min_lower        = 1
+  min_numeric      = 1
+  min_special      = 1
+}
+
+resource "aws_secretsmanager_secret" "db_service_accounts" {
+  for_each                = local.db_service_accounts
+  name_prefix              = "prod/total/db-${each.key}-"
+  description              = "Managed by Terraform - DB credential for ${each.key}"
+  kms_key_id               = data.aws_kms_alias.secrets_cmk.target_key_arn
+  recovery_window_in_days  = 7
+
+  tags = {
+    Environment = "prod"
+    ManagedBy   = "terraform"
+    Service     = each.key
+    Compliance  = "ISMS-P-2.7.2"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "db_service_accounts_val" {
+  for_each  = local.db_service_accounts
+  secret_id = aws_secretsmanager_secret.db_service_accounts[each.key].id
+  secret_string = jsonencode({
+    username = each.key
+    password = random_password.db_service_passwords[each.key].result
+  })
+}
+
+locals {
+  db_service_creds = {
+    for k, v in aws_secretsmanager_secret_version.db_service_accounts_val :
+    k => jsondecode(v.secret_string)
+  }
+}
+
+
+resource "kubernetes_secret_v1" "shared_mysql_accounts" {
+  depends_on = [module.eks, kubernetes_namespace_v1.backend]
+
+  metadata {
+    name      = "shared-mysql-accounts"
+    namespace = kubernetes_namespace_v1.backend.metadata[0].name
+  }
+
+  data = {
+    "member_service_password"  = local.db_service_creds["member_service"]["password"]
+    "auth_service_password"    = local.db_service_creds["auth_service"]["password"]
+    "order_service_password"   = local.db_service_creds["order_service"]["password"]
+    "payment_service_password" = local.db_service_creds["payment_service"]["password"]
+    "oms_service_password"     = local.db_service_creds["oms_service"]["password"]
+  }
+
+  type = "Opaque"
+}
+
+resource "kubernetes_secret_v1" "shared_pg_product_service_credentials" {
+  depends_on = [module.eks, kubernetes_namespace_v1.backend]
+  metadata {
+    name      = "shared-pg-product-service-credentials"
+    namespace = kubernetes_namespace_v1.backend.metadata[0].name
+  }
+  data = {
+    "username" = local.db_service_creds["product_service"]["username"]
+    "password" = local.db_service_creds["product_service"]["password"]
+  }
+  type = "Opaque"
+}
+
+resource "kubernetes_secret_v1" "shared_pg_wms_service_credentials" {
+  depends_on = [module.eks, kubernetes_namespace_v1.backend]
+  metadata {
+    name      = "shared-pg-wms-service-credentials"
+    namespace = kubernetes_namespace_v1.backend.metadata[0].name
+  }
+  data = {
+    "username" = local.db_service_creds["wms_service"]["username"]
+    "password" = local.db_service_creds["wms_service"]["password"]
+  }
+  type = "Opaque"
+}
+
+resource "kubernetes_secret_v1" "shared_pg_scm_service_credentials" {
+  depends_on = [module.eks, kubernetes_namespace_v1.backend]
+  metadata {
+    name      = "shared-pg-scm-service-credentials"
+    namespace = kubernetes_namespace_v1.backend.metadata[0].name
+  }
+  data = {
+    "username" = local.db_service_creds["scm_service"]["username"]
+    "password" = local.db_service_creds["scm_service"]["password"]
+  }
+  type = "Opaque"
+}
