@@ -65,3 +65,14 @@ variable "grafana_admin_password" {
   sensitive   = true
 }
 
+variable "cnpg_backup_bucket" {
+  description = "CNPG_backup"
+  type        = string
+  default     = "kurly-db-backup"
+}
+
+variable "moco_backup_bucket" {
+  description = "MoCo_backup"
+  type        = string
+  default     = "kurly-mysql-backup"
+}
