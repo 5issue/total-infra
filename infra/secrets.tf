@@ -211,9 +211,9 @@ resource "kubernetes_secret_v1" "dev_total_client_secret" {
 
 locals {
   db_service_accounts = toset([
-    "member_service", "auth_service", "order_service",
-    "payment_service", "oms_service",
-    "product_service", "wms_service", "scm_service"
+    "user_user", "auth_user", "order_user",
+    "payment_user", "oms_user",
+    "product_user", "wms_user", "scm_user"
   ])
 }
 
@@ -269,11 +269,10 @@ resource "kubernetes_secret_v1" "shared_mysql_accounts" {
   }
 
   data = {
-    "member_service_password"  = local.db_service_creds["member_service"]["password"]
-    "auth_service_password"    = local.db_service_creds["auth_service"]["password"]
-    "order_service_password"   = local.db_service_creds["order_service"]["password"]
-    "payment_service_password" = local.db_service_creds["payment_service"]["password"]
-    "oms_service_password"     = local.db_service_creds["oms_service"]["password"]
+    "member_service_password"  = local.db_service_creds["user_user"]["password"]
+    "auth_service_password"    = local.db_service_creds["auth_user"]["password"]
+    "order_service_password"   = local.db_service_creds["order_user"]["password"]
+    "payment_service_password" = local.db_service_creds["payment_user"]["password"]
   }
 
   type = "Opaque"
@@ -286,8 +285,8 @@ resource "kubernetes_secret_v1" "shared_pg_product_service_credentials" {
     namespace = kubernetes_namespace_v1.backend.metadata[0].name
   }
   data = {
-    "username" = local.db_service_creds["product_service"]["username"]
-    "password" = local.db_service_creds["product_service"]["password"]
+    "username" = local.db_service_creds["product_user"]["username"]
+    "password" = local.db_service_creds["product_user"]["password"]
   }
   type = "Opaque"
 }
@@ -299,8 +298,8 @@ resource "kubernetes_secret_v1" "shared_pg_wms_service_credentials" {
     namespace = kubernetes_namespace_v1.backend.metadata[0].name
   }
   data = {
-    "username" = local.db_service_creds["wms_service"]["username"]
-    "password" = local.db_service_creds["wms_service"]["password"]
+    "username" = local.db_service_creds["wms_user"]["username"]
+    "password" = local.db_service_creds["wms_user"]["password"]
   }
   type = "Opaque"
 }
@@ -312,8 +311,21 @@ resource "kubernetes_secret_v1" "shared_pg_scm_service_credentials" {
     namespace = kubernetes_namespace_v1.backend.metadata[0].name
   }
   data = {
-    "username" = local.db_service_creds["scm_service"]["username"]
-    "password" = local.db_service_creds["scm_service"]["password"]
+    "username" = local.db_service_creds["scm_user"]["username"]
+    "password" = local.db_service_creds["scm_user"]["password"]
+  }
+  type = "Opaque"
+}
+
+resource "kubernetes_secret_v1" "shared_pg_oms_service_credentials" {
+  depends_on = [module.eks, kubernetes_namespace_v1.backend]
+  metadata {
+    name      = "shared-pg-oms-service-credentials"
+    namespace = kubernetes_namespace_v1.backend.metadata[0].name
+  }
+  data = {
+    "username" = local.db_service_creds["oms_user"]["username"]
+    "password" = local.db_service_creds["oms_user"]["password"]
   }
   type = "Opaque"
 }
