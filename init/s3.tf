@@ -1,5 +1,8 @@
 # 상태파일(tfstate) 백엔드 버킷 및 정적/이미지 관리용 S3 버킷
 
+# 현재 AWS 계정 정보(Account ID)를 조회하는 데이터 소스 추가
+data "aws_caller_identity" "current" {}
+
 # ==============================================================================
 # 1. Terraform 원격 상태 파일(State) 백엔드 버킷 및 잠금 테이블
 # ==============================================================================
@@ -171,6 +174,7 @@ resource "aws_s3_bucket_ownership_controls" "security_logs" {
 resource "aws_s3_bucket_lifecycle_configuration" "security_logs" {
   bucket = aws_s3_bucket.security_logs.id
 
+  # 1) 기존 ALB 로그 수명 주기
   rule {
     id     = "log-retention-policy"
     status = "Enabled"
@@ -190,9 +194,23 @@ resource "aws_s3_bucket_lifecycle_configuration" "security_logs" {
       days = 90
     }
   }
+
+  # 2) Ansible SSM 통신 임시 파일 (3일 뒤 자동 정리)
+  rule {
+    id     = "ansible-temp-cleanup"
+    status = "Enabled"
+
+    filter {
+      prefix = "ansible-temp/"
+    }
+
+    expiration {
+      days = 3
+    }
+  }
 }
 
-# 서울 리전 ALB 서비스 계정(600734575887)이 로그를 버킷에 넣을 수 있도록 권한 허용
+# 서울 리전 ALB 서비스 계정 및 EKS 노드의 S3 접근 허용
 resource "aws_s3_bucket_policy" "security_logs" {
   bucket = aws_s3_bucket.security_logs.id
 
@@ -203,10 +221,43 @@ resource "aws_s3_bucket_policy" "security_logs" {
         Sid    = "AllowALBLogDelivery"
         Effect = "Allow"
         Principal = {
-          AWS = "arn:aws:iam::600734575887:root" # ap-northeast-2 서울 리전 ELB 고정 계정 ID
+          AWS = [
+          # 서울 리전 공식 ALB 로깅 계정
+          "arn:aws:iam::600734575887:root", 
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/mgmt-automation-user"
+          ]
         }
         Action   = "s3:PutObject"
         Resource = "${aws_s3_bucket.security_logs.arn}/alb-logs/*"
+      },
+      {
+        Sid       = "AllowAnsibleSSMAccess"
+        Effect    = "Allow"
+        Principal = {
+          AWS = "*"
+        }
+        Action = [
+          "s3:GetBucketLocation",
+          "s3:GetObject",
+          "s3:GetObjectVersion",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+        Resource = [
+          aws_s3_bucket.security_logs.arn,
+          "${aws_s3_bucket.security_logs.arn}/*"
+        ]
+        Condition = {
+          StringLike = {
+            "aws:PrincipalArn" = [
+              "arn:aws:iam::596601390909:user/mgmt-automation-user",
+              "arn:aws:iam::596601390909:user/infra-*",
+              "arn:aws:iam::596601390909:role/nat-instance-ssm-role-*",
+              "arn:aws:iam::596601390909:role/Karpenter-*",
+              "arn:aws:iam::596601390909:role/worker_node-*"
+            ]
+          }
+        }
       }
     ]
   })

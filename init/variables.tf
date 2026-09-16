@@ -21,3 +21,15 @@ variable "project_name" {
   type        = string
   default     = "kurly-food"
 }
+
+variable "cnpg_backup_bucket" {
+  description = "CNPG_backup"
+  type        = string
+  default     = "kurly-db-backup"
+}
+
+variable "moco_backup_bucket" {
+  description = "MoCo_backup"
+  type        = string
+  default     = "kurly-mysql-backup"
+}

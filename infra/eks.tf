@@ -108,8 +108,8 @@ module "eks" {
   }
 
   cluster_addons = {
-    coredns    = { most_recent = true }
-    kube-proxy = { most_recent = true }
+    # coredns    = { most_recent = true }
+    # kube-proxy = { most_recent = true }
     vpc-cni = {
       most_recent = true
       configuration_values = jsonencode({
@@ -148,6 +148,7 @@ module "eks" {
         AmazonEKSWorkerNodePolicy          = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
         AmazonEC2ContainerRegistryReadOnly = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
         AmazonSSMManagedInstanceCore       = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        AnsibleS3Access                    = aws_iam_policy.node_ansible_s3.arn 
       }
 
       # ========================================================
@@ -155,7 +156,7 @@ module "eks" {
       # ========================================================
       pre_bootstrap_user_data = <<-EOT
         #!/bin/bash
-        set -xe
+        set -x
 
         echo "=== [Security Hardening] Start ==="
 
@@ -268,7 +269,10 @@ module "eks" {
     aws_route_table_association.private_2c,
     aws_route_table_association.public_2a,
     aws_route_table_association.public_2c,
-    aws_internet_gateway.igw
+    aws_internet_gateway.igw,
+    aws_instance.nat_instance_2a,
+    aws_instance.nat_instance_2c,
+    time_sleep.wait_for_nat
   ]
 }
 
