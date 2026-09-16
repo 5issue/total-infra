@@ -331,4 +331,4 @@ resource "kubernetes_secret_v1" "shared_pg_oms_service_credentials" {
     "password" = local.db_service_creds["oms_user"]["password"]
   }
   type = "kubernetes.io/basic-auth"
-}
+} 
