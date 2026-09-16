@@ -283,12 +283,15 @@ resource "kubernetes_secret_v1" "shared_pg_product_service_credentials" {
   metadata {
     name      = "shared-pg-product-service-credentials"
     namespace = kubernetes_namespace_v1.backend.metadata[0].name
+    labels = {
+      "cnpg.io/reload" = "true"
+    }
   }
   data = {
     "username" = local.db_service_creds["product_user"]["username"]
     "password" = local.db_service_creds["product_user"]["password"]
   }
-  type = "Opaque"
+  type = "kubernetes.io/basic-auth"
 }
 
 resource "kubernetes_secret_v1" "shared_pg_wms_service_credentials" {
@@ -296,12 +299,15 @@ resource "kubernetes_secret_v1" "shared_pg_wms_service_credentials" {
   metadata {
     name      = "shared-pg-wms-service-credentials"
     namespace = kubernetes_namespace_v1.backend.metadata[0].name
+    labels = {
+      "cnpg.io/reload" = "true"
+    }
   }
   data = {
     "username" = local.db_service_creds["wms_user"]["username"]
     "password" = local.db_service_creds["wms_user"]["password"]
   }
-  type = "Opaque"
+  type = "kubernetes.io/basic-auth"
 }
 
 resource "kubernetes_secret_v1" "shared_pg_scm_service_credentials" {
@@ -309,12 +315,15 @@ resource "kubernetes_secret_v1" "shared_pg_scm_service_credentials" {
   metadata {
     name      = "shared-pg-scm-service-credentials"
     namespace = kubernetes_namespace_v1.backend.metadata[0].name
+    labels = {
+      "cnpg.io/reload" = "true"
+    }
   }
   data = {
     "username" = local.db_service_creds["scm_user"]["username"]
     "password" = local.db_service_creds["scm_user"]["password"]
   }
-  type = "Opaque"
+  type = "kubernetes.io/basic-auth"
 }
 
 resource "kubernetes_secret_v1" "shared_pg_oms_service_credentials" {
@@ -322,10 +331,13 @@ resource "kubernetes_secret_v1" "shared_pg_oms_service_credentials" {
   metadata {
     name      = "shared-pg-oms-service-credentials"
     namespace = kubernetes_namespace_v1.backend.metadata[0].name
+    labels = {
+      "cnpg.io/reload" = "true"
+    }
   }
   data = {
     "username" = local.db_service_creds["oms_user"]["username"]
     "password" = local.db_service_creds["oms_user"]["password"]
   }
-  type = "Opaque"
-}
+  type = "kubernetes.io/basic-auth"
+} 
