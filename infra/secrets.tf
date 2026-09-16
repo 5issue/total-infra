@@ -264,7 +264,6 @@ resource "kubernetes_secret_v1" "shared_mysql_accounts" {
     "auth_service_password"    = local.db_service_creds["auth_service"]["password"]
     "order_service_password"   = local.db_service_creds["order_service"]["password"]
     "payment_service_password" = local.db_service_creds["payment_service"]["password"]
-    "oms_service_password"     = local.db_service_creds["oms_service"]["password"]
   }
 
   type = "Opaque"
@@ -305,6 +304,19 @@ resource "kubernetes_secret_v1" "shared_pg_scm_service_credentials" {
   data = {
     "username" = local.db_service_creds["scm_service"]["username"]
     "password" = local.db_service_creds["scm_service"]["password"]
+  }
+  type = "Opaque"
+}
+
+resource "kubernetes_secret_v1" "shared_pg_oms_service_credentials" {
+  depends_on = [module.eks, kubernetes_namespace_v1.backend]
+  metadata {
+    name      = "shared-pg-oms-service-credentials"
+    namespace = kubernetes_namespace_v1.backend.metadata[0].name
+  }
+  data = {
+    "username" = local.db_service_creds["oms_service"]["username"]
+    "password" = local.db_service_creds["oms_service"]["password"]
   }
   type = "Opaque"
 }
