@@ -15,6 +15,7 @@
 ├── init/                          # [Stack 2] 공통 기반 리소스 스택
 │   ├── acm.tf                     # 도메인 SSL/TLS 인증서 프로비저닝
 │   ├── ecr.tf                     # 애플리케이션 컨테이너 이미지 프라이빗 저장소
+│   ├── secrets.tf                 # Secrets Manager 리소스
 │   └── s3.tf                      # 정적 자산 및 테라폼 백엔드/데이터 저장용 S3 버킷
 │
 ├── infra/                         # [Stack 3] 메인 네트워크 및 EKS 클러스터 스택
@@ -40,3 +41,4 @@
 │   └── setup-aws-iam.sh           # AWS 로컬 CLI 프로필 및 배포 권한 초기화 스크립트
 │
 └── Makefile                       # 계층별 인프라 배포 및 안전 파기(Destroy) 자동화 파이프라인
+```
