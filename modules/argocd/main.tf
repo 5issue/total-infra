@@ -15,6 +15,11 @@ resource "helm_release" "argocd" {
       dex = {
         enabled = true
       }
+      configs = {
+        cm = {
+          "kustomize.buildOptions" = "--enable-helm"
+        }
+      }
     })
   ]
 

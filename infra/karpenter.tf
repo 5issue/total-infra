@@ -15,6 +15,7 @@ module "karpenter" {
   create_node_iam_role = true
   node_iam_role_additional_policies = {
     AmazonSSMManagedInstanceCore = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+    AnsibleS3Access              = aws_iam_policy.node_ansible_s3.arn
   }
 
   enable_spot_termination = true

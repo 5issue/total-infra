@@ -64,7 +64,7 @@ resource "aws_iam_instance_profile" "ssm_profile" {
 # NAT 2a 인스턴스 (AZ-a 전용)
 resource "aws_instance" "nat_instance_2a" {
   ami                         = data.aws_ami.amazon_linux_2023_arm64.id
-  instance_type               = "t4g.nano"
+  instance_type               = "t4g.micro"
   subnet_id                   = aws_subnet.public_2a.id
   vpc_security_group_ids      = [aws_security_group.nat_sg.id]
   iam_instance_profile        = aws_iam_instance_profile.ssm_profile.name
@@ -87,7 +87,7 @@ resource "aws_instance" "nat_instance_2a" {
 # NAT 2c 인스턴스 (AZ-c 전용)
 resource "aws_instance" "nat_instance_2c" {
   ami                         = data.aws_ami.amazon_linux_2023_arm64.id
-  instance_type               = "t4g.nano"
+  instance_type               = "t4g.micro"
   subnet_id                   = aws_subnet.public_2c.id
   vpc_security_group_ids      = [aws_security_group.nat_sg.id]
   iam_instance_profile        = aws_iam_instance_profile.ssm_profile.name
@@ -105,4 +105,9 @@ resource "aws_instance" "nat_instance_2c" {
               EOF
 
   tags = { Name = "eks-nat-instance-2c" }
+}
+
+resource "time_sleep" "wait_for_nat" {
+  depends_on      = [aws_instance.nat_instance_2a, aws_instance.nat_instance_2c]
+  create_duration = "30s" # NAT 부팅 및 iptables 세팅이 안정화될 때까지 30초 대기
 }

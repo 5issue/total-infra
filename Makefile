@@ -8,7 +8,7 @@ CLUSTER_NAME := test-eks
 # AWS CLI 페이저(less) 비활성화 -> CLI 실행 시 멈춤 현상 원천 차단
 export AWS_PAGER :=
 
-.PHONY: iam-setup iam-plan iam iam-destroy base-plan base base-destroy init plan apply destroy
+.PHONY: iam-setup iam-plan iam iam-destroy base-plan base base-destroy init plan apply rabbitmq-credential-publish rabbitmq-credential-verify destroy scheduler-plan scheduler scheduler-destroy
 
 # ----------------------------------------------------------------
 # 1. IAM 등록 (최초 1회 실행)
@@ -39,24 +39,24 @@ iam-destroy:
 	@cd iam && export AWS_PROFILE=$(AWS_PROFILE) && terraform destroy -auto-approve
 
 # ----------------------------------------------------------------
-# 3. Init 스택 Plan & 배포 (S3, ECR, ACM 등 기반 리소스)
+# 3. Init 스택 Plan & 배포 (공통 기반 리소스)
 # ----------------------------------------------------------------
 base-plan:
 	@echo "=========================================================="
-	@echo " [Init] S3, ECR, ACM Plan 실행 (Profile: $(AWS_PROFILE))"
+	@echo " [Init] 공통 기반 리소스 실행 (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
 	@cd init && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform plan
 
 base:
 	@echo "=========================================================="
-	@echo " [Init] S3, ECR, ACM 배포 (Profile: $(AWS_PROFILE))"
+	@echo " [Init] 공통 기반 리소스 배포 (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
 	@cd init && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform apply -auto-approve
 
-# Init 스택 전용 파기 (S3, ECR, ACM 등 기반 리소스만 삭제)
+# Init 스택 전용 파기 (공통 기반 리소스 전체)
 base-destroy:
 	@echo "=========================================================="
-	@echo " [Init] S3, ECR, ACM 리소스 Destroy (Profile: $(AWS_PROFILE))"
+	@echo " [Init] 공통 기반 리소스 Destroy (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
 	@cd init && export AWS_PROFILE=$(AWS_PROFILE) && terraform destroy -auto-approve
 
@@ -82,15 +82,6 @@ plan:
 # 6. Infra 메인 스택 배포 (VPC/EKS -> Ingress 대기 -> CloudFront 연동)
 # ----------------------------------------------------------------
 apply:
-
-	@echo "=========================================================="
-	@echo " NAT 인스턴스 및 네트워크 선행 배포"
-	@echo "=========================================================="
-	@cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && \
-		terraform apply -target=aws_instance.nat_instance_2a -target=aws_instance.nat_instance_2c -auto-approve
-	@echo "NAT 인스턴스 부팅 및 iptables 포워딩 안정화 대기 (30초)..."
-	@sleep 30
-
 	@echo "=========================================================="
 	@echo " [1/3] 기본 인프라(VPC, EKS 등) 1차 프로비저닝"
 	@echo "=========================================================="
@@ -119,7 +110,18 @@ apply:
 	cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform apply -auto-approve -var="alb_dns_name=$$ALB_HOSTNAME"
 
 # ----------------------------------------------------------------
-# 7. 전체 인프라 안전 파기
+# 7. RabbitMQ Application credential publication (독립 운영 작업)
+# ----------------------------------------------------------------
+rabbitmq-credential-publish:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+		./scripts/publish-rabbitmq-credentials.sh publish
+
+rabbitmq-credential-verify:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+		./scripts/publish-rabbitmq-credentials.sh verify
+
+# ----------------------------------------------------------------
+# 8. 전체 인프라 안전 파기
 # ----------------------------------------------------------------
 destroy:
 	@echo "=========================================================="
@@ -235,3 +237,15 @@ destroy:
 	@echo " [5/5] Infra 메인 스택 Terraform Destroy 실행"
 	@echo "=========================================================="
 	@cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform destroy -auto-approve
+
+# ----------------------------------------------------------------
+# Scheduler 스택 Plan & 배포 (EventBridge + Lambda)
+# ----------------------------------------------------------------
+scheduler-plan:
+	@cd scheduler && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform plan
+
+scheduler:
+	@cd scheduler && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform apply -auto-approve
+
+scheduler-destroy:
+	@cd scheduler && export AWS_PROFILE=$(AWS_PROFILE) && terraform destroy -auto-approve
