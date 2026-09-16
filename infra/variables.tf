@@ -65,6 +65,7 @@ variable "grafana_admin_password" {
   sensitive   = true
 }
 
+
 variable "cnpg_backup_bucket" {
   description = "CNPG_backup"
   type        = string
@@ -75,4 +76,10 @@ variable "moco_backup_bucket" {
   description = "MoCo_backup"
   type        = string
   default     = "kurly-mysql-backup"
+}
+
+variable "alertmanager_slack_webhook_url" {
+  description = "Slack incoming webhook URL for Alertmanager notifications"
+  type        = string
+  sensitive   = true
 }
