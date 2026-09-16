@@ -43,7 +43,7 @@ iam-destroy:
 # ----------------------------------------------------------------
 base-plan:
 	@echo "=========================================================="
-	@echo " [Init] 공통 기반 리소스 실행 (Profile: $(AWS_PROFILE))"
+	@echo " [Init] 공통 기반 리소스 Plan 실행 (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
 	@cd init && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform plan
 

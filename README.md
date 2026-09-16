@@ -41,4 +41,5 @@
 │   └── setup-aws-iam.sh           # AWS 로컬 CLI 프로필 및 배포 권한 초기화 스크립트
 │
 └── Makefile                       # 계층별 인프라 배포 및 안전 파기(Destroy) 자동화 파이프라인
+
 ```
