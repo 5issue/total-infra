@@ -86,7 +86,8 @@ resource "terraform_data" "karpenter_resources" {
   ]
 
   triggers_replace = [
-    module.eks.cluster_endpoint
+    module.eks.cluster_endpoint,
+    filesha256("${path.module}/karpenter-resources.yaml.tftpl")
   ]
 
   provisioner "local-exec" {

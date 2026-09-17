@@ -259,13 +259,19 @@ locals {
   }
 }
 
+locals {
+  target_namespaces = ["backend", "dev"]
+}
 
+# shared-mysql-accounts (backend, dev 양쪽에 생성)
 resource "kubernetes_secret_v1" "shared_mysql_accounts" {
-  depends_on = [module.eks, kubernetes_namespace_v1.backend]
+  for_each = toset(local.target_namespaces)
+
+  depends_on = [module.eks, kubernetes_namespace_v1.backend, kubernetes_namespace_v1.dev]
 
   metadata {
     name      = "shared-mysql-accounts"
-    namespace = kubernetes_namespace_v1.backend.metadata[0].name
+    namespace = each.key
   }
 
   data = {
@@ -278,66 +284,39 @@ resource "kubernetes_secret_v1" "shared_mysql_accounts" {
   type = "Opaque"
 }
 
-resource "kubernetes_secret_v1" "shared_pg_product_service_credentials" {
-  depends_on = [module.eks, kubernetes_namespace_v1.backend]
-  metadata {
-    name      = "shared-pg-product-service-credentials"
-    namespace = kubernetes_namespace_v1.backend.metadata[0].name
-    labels = {
-      "cnpg.io/reload" = "true"
-    }
+# PostgreSQL 서비스별 시크릿들도 양쪽에 생성
+locals {
+  pg_secrets = {
+    "shared-pg-product-service-credentials" = "product_user"
+    "shared-pg-wms-service-credentials"     = "wms_user"
+    "shared-pg-scm-service-credentials"     = "scm_user"
+    "shared-pg-oms-service-credentials"     = "oms_user"
   }
-  data = {
-    "username" = local.db_service_creds["product_user"]["username"]
-    "password" = local.db_service_creds["product_user"]["password"]
-  }
-  type = "kubernetes.io/basic-auth"
 }
 
-resource "kubernetes_secret_v1" "shared_pg_wms_service_credentials" {
-  depends_on = [module.eks, kubernetes_namespace_v1.backend]
-  metadata {
-    name      = "shared-pg-wms-service-credentials"
-    namespace = kubernetes_namespace_v1.backend.metadata[0].name
-    labels = {
-      "cnpg.io/reload" = "true"
+# PostgreSQL 서비스별 시크릿 (backend, dev 양쪽에 생성)
+resource "kubernetes_secret_v1" "shared_pg_credentials" {
+  for_each = {
+    for pair in setproduct(local.target_namespaces, keys(local.pg_secrets)) :
+    "${pair[0]}-${pair[1]}" => {
+      namespace   = pair[0]
+      secret_name = pair[1]
+      user_key    = local.pg_secrets[pair[1]]
     }
   }
-  data = {
-    "username" = local.db_service_creds["wms_user"]["username"]
-    "password" = local.db_service_creds["wms_user"]["password"]
+
+  depends_on = [module.eks, kubernetes_namespace_v1.backend, kubernetes_namespace_v1.dev]
+
+  metadata {
+    name      = each.value.secret_name
+    namespace = each.value.namespace
   }
-  type = "kubernetes.io/basic-auth"
+
+  data = {
+    "username" = local.db_service_creds[each.value.user_key]["username"]
+    "password" = local.db_service_creds[each.value.user_key]["password"]
+  }
+
+  type = "Opaque"
 }
 
-resource "kubernetes_secret_v1" "shared_pg_scm_service_credentials" {
-  depends_on = [module.eks, kubernetes_namespace_v1.backend]
-  metadata {
-    name      = "shared-pg-scm-service-credentials"
-    namespace = kubernetes_namespace_v1.backend.metadata[0].name
-    labels = {
-      "cnpg.io/reload" = "true"
-    }
-  }
-  data = {
-    "username" = local.db_service_creds["scm_user"]["username"]
-    "password" = local.db_service_creds["scm_user"]["password"]
-  }
-  type = "kubernetes.io/basic-auth"
-}
-
-resource "kubernetes_secret_v1" "shared_pg_oms_service_credentials" {
-  depends_on = [module.eks, kubernetes_namespace_v1.backend]
-  metadata {
-    name      = "shared-pg-oms-service-credentials"
-    namespace = kubernetes_namespace_v1.backend.metadata[0].name
-    labels = {
-      "cnpg.io/reload" = "true"
-    }
-  }
-  data = {
-    "username" = local.db_service_creds["oms_user"]["username"]
-    "password" = local.db_service_creds["oms_user"]["password"]
-  }
-  type = "kubernetes.io/basic-auth"
-} 

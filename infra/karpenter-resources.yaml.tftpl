@@ -36,7 +36,7 @@ spec:
           values: ["spot"]
         - key: kubernetes.io/arch
           operator: In
-          values: ["amd64"]       #   values: ["arm64"]
+          values: ["amd64", "arm64"]       #   values: ["arm64"]
         # 인스턴스 패밀리 (c: 컴퓨트 최적화, m: 범용, r: 메모리 최적화)
         # t 시리즈를 포함해도 무방하나, c/m 계열이 MSA 파드 실행에 더 안정적입니다.
         - key: karpenter.k8s.aws/instance-category
@@ -46,8 +46,8 @@ spec:
           operator: Gt
           values: ["2"]
   limits:
-    cpu: "8"
-    memory: "16Gi"
+    cpu: "32"
+    memory: "64Gi"
   disruption:
     consolidationPolicy: WhenEmpty
     consolidateAfter: 30s

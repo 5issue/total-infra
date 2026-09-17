@@ -1,3 +1,26 @@
+# ------------------------------------------------------------------------------
+# ALB에 Host 헤더(cloudyim.store)를 전달하기 위한 커스텀 Origin Request Policy
+# ------------------------------------------------------------------------------
+resource "aws_cloudfront_origin_request_policy" "alb_origin_policy" {
+  name    = "${var.project_name}-alb-origin-policy"
+  comment = "Forward Host header to ALB for SSL cert match"
+
+  cookies_config {
+    cookie_behavior = "all"
+  }
+
+  headers_config {
+    header_behavior = "whitelist"
+    headers {
+      items = ["Host", "User-Agent", "Referer", "Accept", "Accept-Language"]
+    }
+  }
+
+  query_strings_config {
+    query_string_behavior = "all"
+  }
+}
+
 # ==============================================================================
 # 1. CloudFront Origin Access Control (OAC) 생성
 # ==============================================================================
@@ -119,25 +142,3 @@ resource "aws_s3_bucket_policy" "static_assets" {
   })
 }
 
-# ------------------------------------------------------------------------------
-# ALB에 Host 헤더(cloudyim.store)를 전달하기 위한 커스텀 Origin Request Policy
-# ------------------------------------------------------------------------------
-resource "aws_cloudfront_origin_request_policy" "alb_origin_policy" {
-  name    = "${var.project_name}-alb-origin-policy"
-  comment = "Forward Host header to ALB for SSL cert match"
-
-  cookies_config {
-    cookie_behavior = "all"
-  }
-
-  headers_config {
-    header_behavior = "whitelist"
-    headers {
-      items = ["Host", "User-Agent", "Referer", "Accept", "Accept-Language"]
-    }
-  }
-
-  query_strings_config {
-    query_string_behavior = "all"
-  }
-}

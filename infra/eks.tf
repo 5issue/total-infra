@@ -136,9 +136,9 @@ module "eks" {
 
   eks_managed_node_groups = {
     worker_node = {
-      instance_types = ["t3.medium"]            # t4g.large 예정
+      instance_types = ["t4g.large"]            # [변경] t3.medium -> t4g.large (또는 t3.large)
       capacity_type  = "ON_DEMAND"
-      ami_type       = "AL2023_x86_64_STANDARD" # AL2023_ARM_64_STANDARD 예정
+      ami_type       = "AL2023_ARM_64_STANDARD" # [변경] x86_64 -> ARM_64 (t4g 사용 시 필수)
       min_size       = 2
       max_size       = 2
       desired_size   = 2
