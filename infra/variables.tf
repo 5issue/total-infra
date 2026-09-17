@@ -65,6 +65,7 @@ variable "grafana_admin_password" {
   sensitive   = true
 }
 
+
 variable "cnpg_backup_bucket" {
   description = "CNPG_backup"
   type        = string

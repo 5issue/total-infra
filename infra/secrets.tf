@@ -10,13 +10,13 @@ resource "random_password" "client_secret" {
 
 # 1-2. AWS Secrets Manager 시크릿 생성
 resource "aws_secretsmanager_secret" "total_client_secret" {
-  name_prefix             = "prod/total/client-secret-"
-  description             = "Managed by Terraform - Total Frontend & OAuth Client Credentials"
-  
+  name_prefix = "prod/total/client-secret-"
+  description = "Managed by Terraform - Total Frontend & OAuth Client Credentials"
+
   # [K-1 조치] AWS 관리형 키 대신 생성한 CMK ARN 지정
   # (iam 디렉터리와 분리되어 있다면 data aws_kms_alias 또는 remote_state/변수 사용)
   kms_key_id = data.aws_kms_alias.secrets_cmk.target_key_arn
-  
+
   # [K-4 조치] 0(즉시 삭제) 제거 -> 7일 이상 대기기간 지정
   recovery_window_in_days = 7
 
@@ -107,9 +107,9 @@ resource "kubernetes_secret_v1" "argocd_secret" {
     name      = "argocd-secret"
     namespace = kubernetes_namespace_v1.argocd.metadata[0].name # 직접 참조
     labels = {
-      "app.kubernetes.io/name"        = "argocd-secret"
-      "app.kubernetes.io/part-of"     = "argocd"
-      "app.kubernetes.io/managed-by"  = "Helm"
+      "app.kubernetes.io/name"       = "argocd-secret"
+      "app.kubernetes.io/part-of"    = "argocd"
+      "app.kubernetes.io/managed-by" = "Helm"
     }
 
     # Helm 릴리스 연결을 위한 필수 어노테이션 추가
@@ -124,13 +124,13 @@ resource "kubernetes_secret_v1" "argocd_secret" {
     "dex.github.clientSecret" = var.argocd_github_client_secret
 
     # 2. admin1234 공식 bcrypt 해시값
-    "admin.password"          = var.argocd_admin_password_hash
+    "admin.password" = var.argocd_admin_password_hash
 
     # 3. 패스워드 로드용 타임스탬프
-    "admin.passwordMtime"     = "2026-09-04T00:00:00Z"
+    "admin.passwordMtime" = "2026-09-04T00:00:00Z"
 
     # 4. Argo CD 세션 암호화 토큰 키 (변수 참조)
-    "server.secretkey"        = var.argocd_server_secretkey
+    "server.secretkey" = var.argocd_server_secretkey
   }
 
   type = "Opaque"
@@ -171,10 +171,32 @@ resource "kubernetes_secret_v1" "grafana_github_oauth" {
 
   data = {
     # 1) GitHub OAuth Secret (변수 var.grafana_github_client_secret 참조 권장)
-    "GF_AUTH_GITHUB_CLIENT_SECRET"     = var.grafana_github_client_secret
+    "GF_AUTH_GITHUB_CLIENT_SECRET" = var.grafana_github_client_secret
 
     # 2) Grafana Admin 비밀번호
-    "GF_SECURITY_ADMIN_PASSWORD"       = var.grafana_admin_password
+    "GF_SECURITY_ADMIN_PASSWORD" = var.grafana_admin_password
+  }
+
+  type = "Opaque"
+}
+resource "kubernetes_secret_v1" "alertmanager_slack_webhook" {
+  depends_on = [
+    module.eks,
+    kubernetes_namespace_v1.prometheus
+  ]
+
+  metadata {
+    name      = "alertmanager-slack-webhook"
+    namespace = kubernetes_namespace_v1.prometheus.metadata[0].name
+
+    labels = {
+      "app.kubernetes.io/name"      = "alertmanager"
+      "app.kubernetes.io/component" = "notification"
+    }
+  }
+
+  data = {
+    "webhook-url" = local.alertmanager_slack_webhook["webhook-url"]
   }
 
   type = "Opaque"
@@ -191,7 +213,19 @@ resource "kubernetes_namespace_v1" "dev" {
     name = "dev"
   }
 }
+data "aws_secretsmanager_secret" "alertmanager_slack_webhook" {
+  name = "prod/total/alertmanager-slack-webhook"
+}
 
+data "aws_secretsmanager_secret_version" "alertmanager_slack_webhook" {
+  secret_id = data.aws_secretsmanager_secret.alertmanager_slack_webhook.id
+}
+
+locals {
+  alertmanager_slack_webhook = jsondecode(
+    data.aws_secretsmanager_secret_version.alertmanager_slack_webhook.secret_string
+  )
+}
 # 2. dev 네임스페이스용 total-client-secret 배포
 resource "kubernetes_secret_v1" "dev_total_client_secret" {
   depends_on = [module.eks, kubernetes_namespace_v1.dev]
@@ -230,10 +264,10 @@ resource "random_password" "db_service_passwords" {
 
 resource "aws_secretsmanager_secret" "db_service_accounts" {
   for_each                = local.db_service_accounts
-  name_prefix              = "prod/total/db-${each.key}-"
-  description              = "Managed by Terraform - DB credential for ${each.key}"
-  kms_key_id               = data.aws_kms_alias.secrets_cmk.target_key_arn
-  recovery_window_in_days  = 7
+  name_prefix             = "prod/total/db-${each.key}-"
+  description             = "Managed by Terraform - DB credential for ${each.key}"
+  kms_key_id              = data.aws_kms_alias.secrets_cmk.target_key_arn
+  recovery_window_in_days = 7
 
   tags = {
     Environment = "prod"
