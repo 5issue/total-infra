@@ -29,6 +29,15 @@ resource "helm_release" "kube_prometheus_stack" {
         }
       }
 
+      # EKS 관리형 컨트롤 플레인은 scheduler/controller-manager
+      # metrics endpoint를 사용자 클러스터에 노출하지 않으므로 오탐을 비활성화합니다.
+      defaultRules = {
+        disabled = {
+          KubeControllerManagerDown = true
+          KubeSchedulerDown         = true
+        }
+      }
+
       grafana = {
         enabled       = true
         adminPassword = "admin1234"
