@@ -196,7 +196,7 @@ resource "kubernetes_secret_v1" "alertmanager_slack_webhook" {
   }
 
   data = {
-    "webhook-url" = var.alertmanager_slack_webhook_url
+    "webhook-url" = local.alertmanager_slack_webhook["webhook-url"]
   }
 
   type = "Opaque"
@@ -213,7 +213,19 @@ resource "kubernetes_namespace_v1" "dev" {
     name = "dev"
   }
 }
+data "aws_secretsmanager_secret" "alertmanager_slack_webhook" {
+  name = "prod/total/alertmanager-slack-webhook"
+}
 
+data "aws_secretsmanager_secret_version" "alertmanager_slack_webhook" {
+  secret_id = data.aws_secretsmanager_secret.alertmanager_slack_webhook.id
+}
+
+locals {
+  alertmanager_slack_webhook = jsondecode(
+    data.aws_secretsmanager_secret_version.alertmanager_slack_webhook.secret_string
+  )
+}
 # 2. dev 네임스페이스용 total-client-secret 배포
 resource "kubernetes_secret_v1" "dev_total_client_secret" {
   depends_on = [module.eks, kubernetes_namespace_v1.dev]
@@ -252,10 +264,10 @@ resource "random_password" "db_service_passwords" {
 
 resource "aws_secretsmanager_secret" "db_service_accounts" {
   for_each                = local.db_service_accounts
-  name_prefix              = "prod/total/db-${each.key}-"
-  description              = "Managed by Terraform - DB credential for ${each.key}"
-  kms_key_id               = data.aws_kms_alias.secrets_cmk.target_key_arn
-  recovery_window_in_days  = 7
+  name_prefix             = "prod/total/db-${each.key}-"
+  description             = "Managed by Terraform - DB credential for ${each.key}"
+  kms_key_id              = data.aws_kms_alias.secrets_cmk.target_key_arn
+  recovery_window_in_days = 7
 
   tags = {
     Environment = "prod"

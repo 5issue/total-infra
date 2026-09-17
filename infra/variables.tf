@@ -77,9 +77,3 @@ variable "moco_backup_bucket" {
   type        = string
   default     = "kurly-mysql-backup"
 }
-
-variable "alertmanager_slack_webhook_url" {
-  description = "Slack incoming webhook URL for Alertmanager notifications"
-  type        = string
-  sensitive   = true
-}
