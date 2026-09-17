@@ -139,7 +139,7 @@ resource "aws_scheduler_schedule" "scale_down_schedule" {
     mode = "OFF"
   }
 
-  schedule_expression = "cron(0 9 ? * MON-FRI *)" # KST 기준 오후 6시 (UTC 09:00)
+  schedule_expression          = "cron(0 9 ? * MON-FRI *)" # KST 기준 오후 6시 (UTC 09:00)
   schedule_expression_timezone = "UTC"
 
   target {
@@ -157,7 +157,7 @@ resource "aws_scheduler_schedule" "scale_up_schedule" {
     mode = "OFF"
   }
 
-  schedule_expression = "cron(0 5 ? * MON-FRI *)" # KST 기준 오후 2시 (UTC 05:00)
+  schedule_expression          = "cron(0 5 ? * MON-FRI *)" # KST 기준 오후 2시 (UTC 05:00)
   schedule_expression_timezone = "UTC"
 
   target {

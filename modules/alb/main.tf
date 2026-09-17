@@ -22,6 +22,18 @@ resource "terraform_data" "gateway_api_crds" {
   }
 }
 
+resource "terraform_data" "aws_load_balancer_controller_crds" {
+  triggers_replace = [
+    "aws-load-balancer-controller-v2.14.1"
+  ]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      kubectl apply -k "github.com/aws/eks-charts/stable/aws-load-balancer-controller/crds?ref=master"
+    EOT
+  }
+}
+
 # ALB Controller용 RBAC 권한 사전 부여
 resource "kubernetes_cluster_role_binding_v1" "aws_load_balancer_controller" {
   depends_on = [
@@ -49,6 +61,7 @@ resource "kubernetes_cluster_role_binding_v1" "aws_load_balancer_controller" {
 resource "helm_release" "aws_load_balancer_controller" {
   depends_on = [
     terraform_data.gateway_api_crds,
+    terraform_data.aws_load_balancer_controller_crds,
     kubernetes_cluster_role_binding_v1.aws_load_balancer_controller # 권한 바인딩 후 배포 시작
   ]
 
@@ -56,14 +69,17 @@ resource "helm_release" "aws_load_balancer_controller" {
   repository    = "https://aws.github.io/eks-charts"
   chart         = "aws-load-balancer-controller"
   namespace     = "kube-system"
-  version       = "1.11.0"
+  version       = "1.14.1"
   wait          = true
+  timeout       = 900
   force_update  = true
   recreate_pods = true
 
   values = [
     yamlencode({
-      clusterName = var.cluster_name
+      clusterName  = var.cluster_name
+      region       = "ap-northeast-2"
+      vpcId        = var.vpc_id
       replicaCount = 1
 
       # Kubernetes ClusterRole/Binding 생성 허용
@@ -72,8 +88,8 @@ resource "helm_release" "aws_load_balancer_controller" {
       }
 
       serviceAccount = {
-        create      = true
-        name        = "aws-load-balancer-controller"
+        create = true
+        name   = "aws-load-balancer-controller"
         annotations = {
           "eks.amazonaws.com/role-arn" = var.load_balancer_controller_role_arn
         }

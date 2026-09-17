@@ -35,7 +35,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "tfstate" {
 
 # tfstate 버킷 퍼블릭 액세스 4종 완전 차단
 resource "aws_s3_bucket_public_access_block" "tfstate" {
-  bucket                  = aws_s3_bucket.tfstate.id
+  bucket = aws_s3_bucket.tfstate.id
 
   block_public_acls       = true
   block_public_policy     = true
@@ -222,17 +222,17 @@ resource "aws_s3_bucket_policy" "security_logs" {
         Effect = "Allow"
         Principal = {
           AWS = [
-          # 서울 리전 공식 ALB 로깅 계정
-          "arn:aws:iam::600734575887:root", 
-          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/mgmt-automation-user"
+            # 서울 리전 공식 ALB 로깅 계정
+            "arn:aws:iam::600734575887:root",
+            "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/mgmt-automation-user"
           ]
         }
         Action   = "s3:PutObject"
         Resource = "${aws_s3_bucket.security_logs.arn}/alb-logs/*"
       },
       {
-        Sid       = "AllowAnsibleSSMAccess"
-        Effect    = "Allow"
+        Sid    = "AllowAnsibleSSMAccess"
+        Effect = "Allow"
         Principal = {
           AWS = "*"
         }

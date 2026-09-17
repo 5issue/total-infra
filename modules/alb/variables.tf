@@ -22,3 +22,8 @@ variable "load_balancer_controller_role_arn" {
   description = "AWS Load Balancer Controller의 IAM Role ARN"
   type        = string
 }
+
+variable "vpc_id" {
+  description = "VPC ID used by the AWS Load Balancer Controller"
+  type        = string
+}

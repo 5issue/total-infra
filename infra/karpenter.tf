@@ -94,10 +94,10 @@ resource "terraform_data" "karpenter_resources" {
     command = <<-EOT
       cat <<EOF | kubectl apply -f -
       ${templatefile("${path.module}/karpenter-resources.yaml.tftpl", {
-        instance_profile_name = aws_iam_instance_profile.karpenter_node.name
-        cluster_name          = module.eks.cluster_name
-      })}
+    instance_profile_name = aws_iam_instance_profile.karpenter_node.name
+    cluster_name          = module.eks.cluster_name
+})}
       EOF
     EOT
-  }
+}
 }

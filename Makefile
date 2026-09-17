@@ -154,8 +154,8 @@ destroy:
 	@echo "=========================================================="
 	@echo " [3/5] Karpenter 스팟 노드 정리 및 인스턴스 완전 종료 대기"
 	@echo "=========================================================="
-	-kubectl delete nodepools --all --timeout=20s 2>/dev/null || true
-	-kubectl delete nodeclaims --all --timeout=20s 2>/dev/null || true
+	-kubectl delete nodepools --all --timeout=60s 2>/dev/null || true
+	-kubectl delete nodeclaims --all --timeout=60s 2>/dev/null || true
 
 	@SPOT_IDS=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 describe-instances \
 		--region $(AWS_REGION) \

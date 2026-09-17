@@ -41,8 +41,8 @@ resource "aws_iam_policy" "enforce_mfa" {
       },
       # 3) MFA 미인증 시 모든 AWS 작업 차단 (Deny)
       {
-        Sid       = "BlockAllActionsUnlessSignedInWithMFA"
-        Effect    = "Deny"
+        Sid    = "BlockAllActionsUnlessSignedInWithMFA"
+        Effect = "Deny"
         NotAction = [
           "iam:CreateVirtualMFADevice",
           "iam:DeleteVirtualMFADevice",
