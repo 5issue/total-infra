@@ -8,7 +8,7 @@ CLUSTER_NAME := test-eks
 # AWS CLI 페이저(less) 비활성화 -> CLI 실행 시 멈춤 현상 원천 차단
 export AWS_PAGER :=
 
-.PHONY: iam-setup iam-plan iam iam-destroy base-plan base base-destroy init plan apply rabbitmq-credential-publish rabbitmq-credential-verify destroy scheduler-plan scheduler scheduler-destroy
+.PHONY: iam-setup iam-plan iam iam-destroy base-plan base base-destroy init plan apply rabbitmq-credential-publish rabbitmq-credential-verify redis-credential-publish redis-credential-verify destroy scheduler-plan scheduler scheduler-destroy
 
 # ----------------------------------------------------------------
 # 1. IAM 등록 (최초 1회 실행)
@@ -121,7 +121,18 @@ rabbitmq-credential-verify:
 		./scripts/publish-rabbitmq-credentials.sh verify
 
 # ----------------------------------------------------------------
-# 8. 전체 인프라 안전 파기
+# 8. Redis credential publication (독립 운영 작업)
+# ----------------------------------------------------------------
+redis-credential-publish:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+		./scripts/publish-redis-credentials.sh publish
+
+redis-credential-verify:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+		./scripts/publish-redis-credentials.sh verify
+
+# ----------------------------------------------------------------
+# 9. 전체 인프라 안전 파기
 # ----------------------------------------------------------------
 destroy:
 	@echo "=========================================================="

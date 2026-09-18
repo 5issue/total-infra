@@ -3,15 +3,14 @@ set -euo pipefail
 umask 077
 
 # 이 스크립트는 기존 AWSCURRENT SecretVersion만 조회·배포합니다.
-# 매 실행마다 AWSCURRENT를 다시 resolve하고, 해당 실행의 두 Namespace에는 같은 VersionId를 사용합니다.
-# 최초 SecretVersion 생성과 credential 갱신은 별도 initializer/운영 절차에서 수행해야 합니다.
+# 최초 SecretVersion 생성과 password rotation은 별도 승인된 운영 절차에서 수행해야 합니다.
 
 readonly EXPECTED_AWS_ACCOUNT_ID="596601390909"
 readonly EXPECTED_AWS_REGION="ap-northeast-2"
 readonly EXPECTED_EKS_CLUSTER_NAME="test-eks"
-readonly SECRET_NAME="prod/total/rabbitmq-app-credentials"
-readonly KUBERNETES_SECRET_NAME="rabbitmq-app-credentials"
-readonly EXPECTED_USERNAME="total-backend"
+readonly SECRET_NAME="prod/total/redis-credentials"
+readonly KUBERNETES_NAMESPACE="backend"
+readonly KUBERNETES_SECRET_NAME="redis-credentials"
 readonly SOURCE_SECRET_ANNOTATION="total.io/source-secret"
 readonly SOURCE_VERSION_ANNOTATION="total.io/source-version-id"
 readonly KUBECTL_REQUEST_TIMEOUT="20s"
@@ -23,7 +22,6 @@ readonly EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-$EXPECTED_EKS_CLUSTER_NAME}"
 secret_payload=""
 source_version_id=""
 expected_eks_endpoint=""
-verified_version_id=""
 
 cleanup() {
   unset secret_payload
@@ -31,11 +29,11 @@ cleanup() {
 trap cleanup EXIT
 
 log() {
-  printf '[rabbitmq-credential] %s\n' "$*"
+  printf '[redis-credential] %s\n' "$*"
 }
 
 die() {
-  printf '[rabbitmq-credential] ERROR: %s\n' "$*" >&2
+  printf '[redis-credential] ERROR: %s\n' "$*" >&2
   exit 1
 }
 
@@ -104,7 +102,7 @@ aws_preflight() {
 
 kubernetes_preflight() {
   local current_context current_server kube_exec_command kube_exec_cluster
-  local kube_exec_profile kube_exec_role kube_exec_region namespace
+  local kube_exec_profile kube_exec_role kube_exec_region
 
   if ! current_context="$(kubectl config current-context 2>/dev/null)"; then
     die "현재 kubeconfig context를 확인할 수 없습니다."
@@ -157,17 +155,16 @@ kubernetes_preflight() {
   [[ -z "$kube_exec_role" ]] || \
     die "repository에 정의되지 않은 kubeconfig role override가 있습니다."
 
-  for namespace in messaging backend; do
-    if ! kubectl --request-timeout="$KUBECTL_REQUEST_TIMEOUT" get namespace "$namespace" -o name >/dev/null; then
-      die "Namespace가 없거나 접근할 수 없습니다: $namespace"
-    fi
-  done
+  if ! kubectl --request-timeout="$KUBECTL_REQUEST_TIMEOUT" \
+    get namespace "$KUBERNETES_NAMESPACE" -o name >/dev/null; then
+    die "Namespace가 없거나 접근할 수 없습니다: $KUBERNETES_NAMESPACE"
+  fi
 
   log "Kubernetes preflight 완료: context=$current_context"
 }
 
 resolve_secret_version() {
-  local secret_metadata
+  local secret_metadata deleted_date
 
   if ! secret_metadata="$(
     aws secretsmanager describe-secret \
@@ -176,8 +173,12 @@ resolve_secret_version() {
       --secret-id "$SECRET_NAME" \
       --output json
   )"; then
-    die "RabbitMQ Secrets Manager metadata 조회에 실패했습니다."
+    die "Redis Secrets Manager metadata 조회에 실패했습니다."
   fi
+
+  deleted_date="$(printf '%s' "$secret_metadata" | jq -r '.DeletedDate // empty')"
+  [[ -z "$deleted_date" ]] || \
+    die "Redis Secrets Manager Secret이 삭제 예약 상태입니다. 복구 전에는 publication하지 않습니다."
 
   if ! source_version_id="$(
     printf '%s' "$secret_metadata" | jq -er '
@@ -189,8 +190,12 @@ resolve_secret_version() {
   )"; then
     die "AWSCURRENT VersionId가 정확히 하나가 아닙니다. 별도 initializer/운영 절차를 확인하세요."
   fi
-  unset secret_metadata
+  unset secret_metadata deleted_date
 
+  log "삭제 예약 없음 및 AWSCURRENT VersionId 고정 완료"
+}
+
+load_secret_payload() {
   if ! secret_payload="$(
     aws secretsmanager get-secret-value \
       --profile "$AWS_PROFILE" \
@@ -200,27 +205,23 @@ resolve_secret_version() {
       --query SecretString \
       --output text
   )"; then
-    die "고정된 RabbitMQ SecretVersion payload 조회에 실패했습니다."
+    die "고정된 Redis SecretVersion payload 조회에 실패했습니다."
   fi
 
-  if ! printf '%s' "$secret_payload" | jq -e --arg expected_username "$EXPECTED_USERNAME" '
+  if ! printf '%s' "$secret_payload" | jq -e '
     type == "object"
-    and has("username")
-    and has("password")
-    and (.username | type == "string" and . == $expected_username)
+    and keys == ["password"]
     and (.password | type == "string" and length > 0)
   ' >/dev/null; then
-    die "RabbitMQ SecretVersion payload schema가 계약과 일치하지 않습니다."
+    die "Redis SecretVersion payload schema가 계약과 일치하지 않습니다."
   fi
 
-  log "AWSCURRENT VersionId 고정 및 payload schema 확인 완료"
+  log "SecretVersion payload schema 확인 완료"
 }
 
 publish_secret() {
-  local namespace="$1"
-
   if ! printf '%s' "$secret_payload" | jq -c \
-    --arg namespace "$namespace" \
+    --arg namespace "$KUBERNETES_NAMESPACE" \
     --arg secret_name "$KUBERNETES_SECRET_NAME" \
     --arg source_secret "$SECRET_NAME" \
     --arg source_version "$source_version_id" \
@@ -239,29 +240,26 @@ publish_secret() {
         },
         type: "Opaque",
         data: {
-          username: (.username | @base64),
           password: (.password | @base64)
         }
       }
     ' | kubectl --request-timeout="$KUBECTL_REQUEST_TIMEOUT" apply \
       --server-side \
-      --field-manager=rabbitmq-credential-publisher \
+      --field-manager=redis-credential-publisher \
       -f - >/dev/null; then
-    die "Kubernetes Secret publication에 실패했습니다: ${namespace}/${KUBERNETES_SECRET_NAME}"
+    die "Kubernetes Secret publication에 실패했습니다: ${KUBERNETES_NAMESPACE}/${KUBERNETES_SECRET_NAME}"
   fi
 
-  log "Kubernetes Secret publication 완료: ${namespace}/${KUBERNETES_SECRET_NAME}"
+  log "Kubernetes Secret publication 완료: ${KUBERNETES_NAMESPACE}/${KUBERNETES_SECRET_NAME}"
 }
 
 verify_secret() {
-  local namespace="$1"
-  local expected_version_id="${2:-}"
-  local summary secret_type source_secret source_version has_username has_password
+  local summary secret_type source_secret source_version has_exact_keys
 
   if ! summary="$(
     kubectl --request-timeout="$KUBECTL_REQUEST_TIMEOUT" \
       get secret "$KUBERNETES_SECRET_NAME" \
-      --namespace "$namespace" \
+      --namespace "$KUBERNETES_NAMESPACE" \
       -o json | jq -er \
         --arg source_secret_annotation "$SOURCE_SECRET_ANNOTATION" \
         --arg source_version_annotation "$SOURCE_VERSION_ANNOTATION" '
@@ -269,52 +267,37 @@ verify_secret() {
             (.type // ""),
             (.metadata.annotations[$source_secret_annotation] // ""),
             (.metadata.annotations[$source_version_annotation] // ""),
-            ((.data | type == "object") and (.data | has("username")) | tostring),
-            ((.data | type == "object") and (.data | has("password")) | tostring)
+            ((.data // {}) | ((type == "object") and (keys == ["password"])) | tostring)
           ] | join("|")
         '
   )"; then
-    die "Kubernetes Secret 검증 조회에 실패했습니다: ${namespace}/${KUBERNETES_SECRET_NAME}"
+    die "Kubernetes Secret 검증 조회에 실패했습니다: ${KUBERNETES_NAMESPACE}/${KUBERNETES_SECRET_NAME}"
   fi
 
-  IFS='|' read -r secret_type source_secret source_version has_username has_password <<<"$summary"
-  [[ "$secret_type" == "Opaque" ]] || die "Secret type 검증 실패: $namespace"
-  [[ "$source_secret" == "$SECRET_NAME" ]] || die "source-secret annotation 검증 실패: $namespace"
-  [[ -n "$source_version" ]] || die "source-version-id annotation이 없습니다: $namespace"
-  [[ "$has_username" == "true" ]] || die "username key가 없습니다: $namespace"
-  [[ "$has_password" == "true" ]] || die "password key가 없습니다: $namespace"
-  [[ -z "$expected_version_id" || "$source_version" == "$expected_version_id" ]] || \
-    die "고정한 source VersionId와 publication 결과가 다릅니다: $namespace"
+  IFS='|' read -r secret_type source_secret source_version has_exact_keys <<<"$summary"
+  [[ "$secret_type" == "Opaque" ]] || die "Secret type 검증 실패: $KUBERNETES_NAMESPACE"
+  [[ "$source_secret" == "$SECRET_NAME" ]] || \
+    die "source-secret annotation 검증 실패: $KUBERNETES_NAMESPACE"
+  [[ "$source_version" == "$source_version_id" ]] || \
+    die "현재 AWSCURRENT와 source-version-id가 일치하지 않습니다: $KUBERNETES_NAMESPACE"
+  [[ "$has_exact_keys" == "true" ]] || \
+    die "Kubernetes Secret key schema가 정확히 password 하나가 아닙니다: $KUBERNETES_NAMESPACE"
 
-  verified_version_id="$source_version"
-  log "Kubernetes Secret metadata/key 검증 완료: ${namespace}/${KUBERNETES_SECRET_NAME}"
+  log "Kubernetes Secret metadata/key 및 AWSCURRENT 일치 검증 완료: ${KUBERNETES_NAMESPACE}/${KUBERNETES_SECRET_NAME}"
 }
 
 publish() {
   resolve_secret_version
-
-  publish_secret messaging
-  verify_secret messaging "$source_version_id"
-
-  publish_secret backend
-  verify_secret backend "$source_version_id"
-
-  log "동일한 source VersionId의 RabbitMQ credential publication 완료"
+  load_secret_payload
+  publish_secret
+  verify_secret
+  log "고정한 source VersionId의 Redis credential publication 완료"
 }
 
 verify() {
-  local messaging_version backend_version
-
-  verify_secret messaging
-  messaging_version="$verified_version_id"
-
-  verify_secret backend
-  backend_version="$verified_version_id"
-
-  [[ "$messaging_version" == "$backend_version" ]] || \
-    die "두 Namespace의 source-version-id가 일치하지 않습니다."
-
-  log "두 Namespace의 RabbitMQ Secret publication 상태가 일치합니다."
+  resolve_secret_version
+  verify_secret
+  log "Redis Secret publication 상태가 현재 AWSCURRENT와 일치합니다."
 }
 
 main() {
