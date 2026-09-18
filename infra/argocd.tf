@@ -1,11 +1,8 @@
-# total-infra/infra/argocd.tf
-
 module "argocd" {
   source = "../modules/argocd"
-  
-  # EKS 클러스터 및 Karpenter/노드 생성이 완료된 후 실행되도록 보장
+
   depends_on = [
-    module.eks 
+    module.eks
   ]
 }
 

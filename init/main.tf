@@ -11,7 +11,7 @@ terraform {
 
   backend "s3" {
     bucket         = "issue-tfstate-ap-northeast-2"
-    key            = "init/terraform.tfstate"       # init 전용 경로!
+    key            = "init/terraform.tfstate" # init 전용 경로!
     region         = "ap-northeast-2"
     dynamodb_table = "issue-tfstate-locks"
     encrypt        = true

@@ -20,7 +20,7 @@ terraform {
     bucket         = "issue-tfstate-ap-northeast-2" # s3 버킷 이름
     key            = "infra/terraform.tfstate"
     region         = "ap-northeast-2"
-    dynamodb_table = "issue-tfstate-locks"          # 동시 실행 잠금 테이블
+    dynamodb_table = "issue-tfstate-locks" # 동시 실행 잠금 테이블
     encrypt        = true
   }
 }
@@ -37,7 +37,7 @@ provider "aws" {
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-  
+
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
@@ -49,7 +49,7 @@ provider "helm" {
   kubernetes {
     host                   = module.eks.cluster_endpoint
     cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-    
+
     exec {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"

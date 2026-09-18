@@ -86,17 +86,18 @@ resource "terraform_data" "karpenter_resources" {
   ]
 
   triggers_replace = [
-    module.eks.cluster_endpoint
+    module.eks.cluster_endpoint,
+    filesha256("${path.module}/karpenter-resources.yaml.tftpl")
   ]
 
   provisioner "local-exec" {
     command = <<-EOT
       cat <<EOF | kubectl apply -f -
       ${templatefile("${path.module}/karpenter-resources.yaml.tftpl", {
-        instance_profile_name = aws_iam_instance_profile.karpenter_node.name
-        cluster_name          = module.eks.cluster_name
-      })}
+    instance_profile_name = aws_iam_instance_profile.karpenter_node.name
+    cluster_name          = module.eks.cluster_name
+})}
       EOF
     EOT
-  }
+}
 }

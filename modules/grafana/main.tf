@@ -9,6 +9,35 @@ resource "helm_release" "kube_prometheus_stack" {
 
   values = [
     yamlencode({
+      alertmanager = {
+        alertmanagerSpec = {
+          alertmanagerConfigSelector = {
+            matchLabels = {
+              "alertmanager-config" = "main"
+            }
+          }
+
+          alertmanagerConfigNamespaceSelector = {
+            matchLabels = {
+              "kubernetes.io/metadata.name" = "prometheus"
+            }
+          }
+
+          alertmanagerConfigMatcherStrategy = {
+            type = "None"
+          }
+        }
+      }
+
+      # EKS 관리형 컨트롤 플레인은 scheduler/controller-manager
+      # metrics endpoint를 사용자 클러스터에 노출하지 않으므로 오탐을 비활성화합니다.
+      defaultRules = {
+        disabled = {
+          KubeControllerManagerDown = true
+          KubeSchedulerDown         = true
+        }
+      }
+
       grafana = {
         enabled       = true
         adminPassword = "admin1234"
@@ -18,14 +47,14 @@ resource "helm_release" "kube_prometheus_stack" {
             root_url = "https://grafana.cloudyim.store"
           }
           "auth.github" = {
-            enabled      = true
+            enabled       = true
             allow_sign_up = true
-            auto_login   = false
-            client_id    = "Ov23litHemenldpm9HcO" # Grafana용 Client ID
-            scopes       = "user:email,read:org"
-            auth_url     = "https://github.com/login/oauth/authorize"
-            token_url    = "https://github.com/login/oauth/access_token"
-            api_url      = "https://api.github.com/user"
+            auto_login    = false
+            client_id     = "Ov23litHemenldpm9HcO" # Grafana용 Client ID
+            scopes        = "user:email,read:org"
+            auth_url      = "https://github.com/login/oauth/authorize"
+            token_url     = "https://github.com/login/oauth/access_token"
+            api_url       = "https://api.github.com/user"
 
             # 해당 조직 멤버가 아니면 403 Access Denied로 원천 차단됨
             allowed_organizations = "5issue"

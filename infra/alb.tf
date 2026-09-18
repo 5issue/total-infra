@@ -23,7 +23,7 @@ data "aws_acm_certificate" "alb" {
 # 2. ALB 서브모듈 호출 (IAM Role ARN을 인자로 전달)
 module "alb" {
   source                            = "../modules/alb"
-
+  vpc_id                            = aws_subnet.public_2a.vpc_id
   cluster_name                      = module.eks.cluster_name
   cluster_endpoint                  = module.eks.cluster_endpoint
   domain_name                       = var.domain_name

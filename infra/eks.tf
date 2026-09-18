@@ -13,13 +13,13 @@ module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 20.0"
 
-  cluster_name                             = var.cluster_name
-  cluster_version                          = "1.36"
+  cluster_name    = var.cluster_name
+  cluster_version = "1.36"
 
-  vpc_id                                   = aws_vpc.main.id
-  subnet_ids                               = [aws_subnet.private_2a.id, aws_subnet.private_2c.id]
-  cluster_endpoint_public_access           = true
-  cluster_endpoint_private_access          = true
+  vpc_id                          = aws_vpc.main.id
+  subnet_ids                      = [aws_subnet.private_2a.id, aws_subnet.private_2c.id]
+  cluster_endpoint_public_access  = true
+  cluster_endpoint_private_access = true
 
   # 1명만 독점하는 옵션 제거
   enable_cluster_creator_admin_permissions = false
@@ -84,7 +84,7 @@ module "eks" {
       }
     }
   }
-  
+
 
   # =========================================================================
   # [보안 요구사항] EKS Secrets KMS 암호화 활성화 및 권한 위임 명시
@@ -104,7 +104,7 @@ module "eks" {
   ]
 
   node_security_group_tags = {
-    "karpenter.sh/discovery"               = var.cluster_name
+    "karpenter.sh/discovery" = var.cluster_name
   }
 
   cluster_addons = {
@@ -125,20 +125,20 @@ module "eks" {
 
   node_security_group_additional_rules = {
     ingress_vpc_all = {
-      description   = "Allow all traffic from VPC CIDR"
-      protocol      = "-1"
-      from_port     = 0
-      to_port       = 0
-      type          = "ingress"
-      cidr_blocks   = [aws_vpc.main.cidr_block]
+      description = "Allow all traffic from VPC CIDR"
+      protocol    = "-1"
+      from_port   = 0
+      to_port     = 0
+      type        = "ingress"
+      cidr_blocks = [aws_vpc.main.cidr_block]
     }
   }
 
   eks_managed_node_groups = {
     worker_node = {
-      instance_types = ["t3.medium"]            # t4g.large 예정
+      instance_types = ["t4g.large"] # [변경] t3.medium -> t4g.large (또는 t3.large)
       capacity_type  = "ON_DEMAND"
-      ami_type       = "AL2023_x86_64_STANDARD" # AL2023_ARM_64_STANDARD 예정
+      ami_type       = "AL2023_ARM_64_STANDARD" # [변경] x86_64 -> ARM_64 (t4g 사용 시 필수)
       min_size       = 2
       max_size       = 2
       desired_size   = 2
@@ -148,7 +148,7 @@ module "eks" {
         AmazonEKSWorkerNodePolicy          = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
         AmazonEC2ContainerRegistryReadOnly = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
         AmazonSSMManagedInstanceCore       = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-        AnsibleS3Access                    = aws_iam_policy.node_ansible_s3.arn 
+        AnsibleS3Access                    = aws_iam_policy.node_ansible_s3.arn
       }
 
       # ========================================================
@@ -290,7 +290,7 @@ module "ebs_csi" {
 resource "null_resource" "update_kubeconfig" {
   depends_on = [module.eks]
 
-  triggers  = {
+  triggers = {
     cluster_endpoint = module.eks.cluster_endpoint
   }
 

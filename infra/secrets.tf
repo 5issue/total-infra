@@ -10,13 +10,13 @@ resource "random_password" "client_secret" {
 
 # 1-2. AWS Secrets Manager 시크릿 생성
 resource "aws_secretsmanager_secret" "total_client_secret" {
-  name_prefix             = "prod/total/client-secret-"
-  description             = "Managed by Terraform - Total Frontend & OAuth Client Credentials"
-  
+  name_prefix = "prod/total/client-secret-"
+  description = "Managed by Terraform - Total Frontend & OAuth Client Credentials"
+
   # [K-1 조치] AWS 관리형 키 대신 생성한 CMK ARN 지정
   # (iam 디렉터리와 분리되어 있다면 data aws_kms_alias 또는 remote_state/변수 사용)
   kms_key_id = data.aws_kms_alias.secrets_cmk.target_key_arn
-  
+
   # [K-4 조치] 0(즉시 삭제) 제거 -> 7일 이상 대기기간 지정
   recovery_window_in_days = 7
 
@@ -107,9 +107,9 @@ resource "kubernetes_secret_v1" "argocd_secret" {
     name      = "argocd-secret"
     namespace = kubernetes_namespace_v1.argocd.metadata[0].name # 직접 참조
     labels = {
-      "app.kubernetes.io/name"        = "argocd-secret"
-      "app.kubernetes.io/part-of"     = "argocd"
-      "app.kubernetes.io/managed-by"  = "Helm"
+      "app.kubernetes.io/name"       = "argocd-secret"
+      "app.kubernetes.io/part-of"    = "argocd"
+      "app.kubernetes.io/managed-by" = "Helm"
     }
 
     # Helm 릴리스 연결을 위한 필수 어노테이션 추가
@@ -124,13 +124,13 @@ resource "kubernetes_secret_v1" "argocd_secret" {
     "dex.github.clientSecret" = var.argocd_github_client_secret
 
     # 2. admin1234 공식 bcrypt 해시값
-    "admin.password"          = var.argocd_admin_password_hash
+    "admin.password" = var.argocd_admin_password_hash
 
     # 3. 패스워드 로드용 타임스탬프
-    "admin.passwordMtime"     = "2026-09-04T00:00:00Z"
+    "admin.passwordMtime" = "2026-09-04T00:00:00Z"
 
     # 4. Argo CD 세션 암호화 토큰 키 (변수 참조)
-    "server.secretkey"        = var.argocd_server_secretkey
+    "server.secretkey" = var.argocd_server_secretkey
   }
 
   type = "Opaque"
@@ -171,10 +171,32 @@ resource "kubernetes_secret_v1" "grafana_github_oauth" {
 
   data = {
     # 1) GitHub OAuth Secret (변수 var.grafana_github_client_secret 참조 권장)
-    "GF_AUTH_GITHUB_CLIENT_SECRET"     = var.grafana_github_client_secret
+    "GF_AUTH_GITHUB_CLIENT_SECRET" = var.grafana_github_client_secret
 
     # 2) Grafana Admin 비밀번호
-    "GF_SECURITY_ADMIN_PASSWORD"       = var.grafana_admin_password
+    "GF_SECURITY_ADMIN_PASSWORD" = var.grafana_admin_password
+  }
+
+  type = "Opaque"
+}
+resource "kubernetes_secret_v1" "alertmanager_slack_webhook" {
+  depends_on = [
+    module.eks,
+    kubernetes_namespace_v1.prometheus
+  ]
+
+  metadata {
+    name      = "alertmanager-slack-webhook"
+    namespace = kubernetes_namespace_v1.prometheus.metadata[0].name
+
+    labels = {
+      "app.kubernetes.io/name"      = "alertmanager"
+      "app.kubernetes.io/component" = "notification"
+    }
+  }
+
+  data = {
+    "webhook-url" = local.alertmanager_slack_webhook["webhook-url"]
   }
 
   type = "Opaque"
@@ -191,7 +213,19 @@ resource "kubernetes_namespace_v1" "dev" {
     name = "dev"
   }
 }
+data "aws_secretsmanager_secret" "alertmanager_slack_webhook" {
+  name = "prod/total/alertmanager-slack-webhook"
+}
 
+data "aws_secretsmanager_secret_version" "alertmanager_slack_webhook" {
+  secret_id = data.aws_secretsmanager_secret.alertmanager_slack_webhook.id
+}
+
+locals {
+  alertmanager_slack_webhook = jsondecode(
+    data.aws_secretsmanager_secret_version.alertmanager_slack_webhook.secret_string
+  )
+}
 # 2. dev 네임스페이스용 total-client-secret 배포
 resource "kubernetes_secret_v1" "dev_total_client_secret" {
   depends_on = [module.eks, kubernetes_namespace_v1.dev]
@@ -211,9 +245,9 @@ resource "kubernetes_secret_v1" "dev_total_client_secret" {
 
 locals {
   db_service_accounts = toset([
-    "member_service", "auth_service", "order_service",
-    "payment_service", "oms_service",
-    "product_service", "wms_service", "scm_service"
+    "user_user", "auth_user", "order_user",
+    "payment_user", "oms_user",
+    "product_user", "wms_user", "scm_user"
   ])
 }
 
@@ -230,10 +264,10 @@ resource "random_password" "db_service_passwords" {
 
 resource "aws_secretsmanager_secret" "db_service_accounts" {
   for_each                = local.db_service_accounts
-  name_prefix              = "prod/total/db-${each.key}-"
-  description              = "Managed by Terraform - DB credential for ${each.key}"
-  kms_key_id               = data.aws_kms_alias.secrets_cmk.target_key_arn
-  recovery_window_in_days  = 7
+  name_prefix             = "prod/total/db-${each.key}-"
+  description             = "Managed by Terraform - DB credential for ${each.key}"
+  kms_key_id              = data.aws_kms_alias.secrets_cmk.target_key_arn
+  recovery_window_in_days = 7
 
   tags = {
     Environment = "prod"
@@ -259,61 +293,64 @@ locals {
   }
 }
 
+locals {
+  target_namespaces = ["backend", "dev"]
+}
 
+# shared-mysql-accounts (backend, dev 양쪽에 생성)
 resource "kubernetes_secret_v1" "shared_mysql_accounts" {
-  depends_on = [module.eks, kubernetes_namespace_v1.backend]
+  for_each = toset(local.target_namespaces)
+
+  depends_on = [module.eks, kubernetes_namespace_v1.backend, kubernetes_namespace_v1.dev]
 
   metadata {
     name      = "shared-mysql-accounts"
-    namespace = kubernetes_namespace_v1.backend.metadata[0].name
+    namespace = each.key
   }
 
   data = {
-    "member_service_password"  = local.db_service_creds["member_service"]["password"]
-    "auth_service_password"    = local.db_service_creds["auth_service"]["password"]
-    "order_service_password"   = local.db_service_creds["order_service"]["password"]
-    "payment_service_password" = local.db_service_creds["payment_service"]["password"]
-    "oms_service_password"     = local.db_service_creds["oms_service"]["password"]
+    "member_service_password"  = local.db_service_creds["user_user"]["password"]
+    "auth_service_password"    = local.db_service_creds["auth_user"]["password"]
+    "order_service_password"   = local.db_service_creds["order_user"]["password"]
+    "payment_service_password" = local.db_service_creds["payment_user"]["password"]
   }
 
   type = "Opaque"
 }
 
-resource "kubernetes_secret_v1" "shared_pg_product_service_credentials" {
-  depends_on = [module.eks, kubernetes_namespace_v1.backend]
+# PostgreSQL 서비스별 시크릿들도 양쪽에 생성
+locals {
+  pg_secrets = {
+    "shared-pg-product-service-credentials" = "product_user"
+    "shared-pg-wms-service-credentials"     = "wms_user"
+    "shared-pg-scm-service-credentials"     = "scm_user"
+    "shared-pg-oms-service-credentials"     = "oms_user"
+  }
+}
+
+# PostgreSQL 서비스별 시크릿 (backend, dev 양쪽에 생성)
+resource "kubernetes_secret_v1" "shared_pg_credentials" {
+  for_each = {
+    for pair in setproduct(local.target_namespaces, keys(local.pg_secrets)) :
+    "${pair[0]}-${pair[1]}" => {
+      namespace   = pair[0]
+      secret_name = pair[1]
+      user_key    = local.pg_secrets[pair[1]]
+    }
+  }
+
+  depends_on = [module.eks, kubernetes_namespace_v1.backend, kubernetes_namespace_v1.dev]
+
   metadata {
-    name      = "shared-pg-product-service-credentials"
-    namespace = kubernetes_namespace_v1.backend.metadata[0].name
+    name      = each.value.secret_name
+    namespace = each.value.namespace
   }
+
   data = {
-    "username" = local.db_service_creds["product_service"]["username"]
-    "password" = local.db_service_creds["product_service"]["password"]
+    "username" = local.db_service_creds[each.value.user_key]["username"]
+    "password" = local.db_service_creds[each.value.user_key]["password"]
   }
+
   type = "Opaque"
 }
 
-resource "kubernetes_secret_v1" "shared_pg_wms_service_credentials" {
-  depends_on = [module.eks, kubernetes_namespace_v1.backend]
-  metadata {
-    name      = "shared-pg-wms-service-credentials"
-    namespace = kubernetes_namespace_v1.backend.metadata[0].name
-  }
-  data = {
-    "username" = local.db_service_creds["wms_service"]["username"]
-    "password" = local.db_service_creds["wms_service"]["password"]
-  }
-  type = "Opaque"
-}
-
-resource "kubernetes_secret_v1" "shared_pg_scm_service_credentials" {
-  depends_on = [module.eks, kubernetes_namespace_v1.backend]
-  metadata {
-    name      = "shared-pg-scm-service-credentials"
-    namespace = kubernetes_namespace_v1.backend.metadata[0].name
-  }
-  data = {
-    "username" = local.db_service_creds["scm_service"]["username"]
-    "password" = local.db_service_creds["scm_service"]["password"]
-  }
-  type = "Opaque"
-}

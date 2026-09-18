@@ -1,3 +1,26 @@
+# ------------------------------------------------------------------------------
+# ALB에 Host 헤더(cloudyim.store)를 전달하기 위한 커스텀 Origin Request Policy
+# ------------------------------------------------------------------------------
+resource "aws_cloudfront_origin_request_policy" "alb_origin_policy" {
+  name    = "${var.project_name}-alb-origin-policy"
+  comment = "Forward Host header to ALB for SSL cert match"
+
+  cookies_config {
+    cookie_behavior = "all"
+  }
+
+  headers_config {
+    header_behavior = "whitelist"
+    headers {
+      items = ["Host", "User-Agent", "Referer", "Accept", "Accept-Language"]
+    }
+  }
+
+  query_strings_config {
+    query_string_behavior = "all"
+  }
+}
+
 # ==============================================================================
 # 1. CloudFront Origin Access Control (OAC) 생성
 # ==============================================================================
@@ -58,7 +81,7 @@ resource "aws_cloudfront_distribution" "main" {
   is_ipv6_enabled     = true
   default_root_object = ""
   # Route 53과 연동할 도메인 별칭
-  aliases             = [var.domain_name, "www.${var.domain_name}"]
+  aliases = [var.domain_name, "www.${var.domain_name}"]
 
   # 기본 캐시 동작 (EKS ALB로 인입되는 모든 트래픽)
   default_cache_behavior {
@@ -97,13 +120,13 @@ resource "aws_cloudfront_distribution" "main" {
 resource "aws_s3_bucket_policy" "static_assets" {
   count  = var.alb_dns_name != "" ? 1 : 0
   bucket = data.aws_s3_bucket.static_assets.id
-  
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid       = "AllowCloudFrontServicePrincipalReadOnly"
-        Effect    = "Allow"
+        Sid    = "AllowCloudFrontServicePrincipalReadOnly"
+        Effect = "Allow"
         Principal = {
           Service = "cloudfront.amazonaws.com"
         }
@@ -119,25 +142,3 @@ resource "aws_s3_bucket_policy" "static_assets" {
   })
 }
 
-# ------------------------------------------------------------------------------
-# ALB에 Host 헤더(cloudyim.store)를 전달하기 위한 커스텀 Origin Request Policy
-# ------------------------------------------------------------------------------
-resource "aws_cloudfront_origin_request_policy" "alb_origin_policy" {
-  name    = "${var.project_name}-alb-origin-policy"
-  comment = "Forward Host header to ALB for SSL cert match"
-
-  cookies_config {
-    cookie_behavior = "all"
-  }
-
-  headers_config {
-    header_behavior = "whitelist"
-    headers {
-      items = ["Host", "User-Agent", "Referer", "Accept", "Accept-Language"]
-    }
-  }
-
-  query_strings_config {
-    query_string_behavior = "all"
-  }
-}

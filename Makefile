@@ -96,9 +96,9 @@ apply:
 	@echo " [2/3] K8s Ingress 생성 및 ALB DNS 할당 대기 중..."
 	@echo "=========================================================="
 	@echo "🔔 Ingress 매니페스트 배포 후 ALB DNS가 할당될 때까지 대기합니다..."
-	@while [ -z "$$(kubectl get ingress -n frontend -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}' 2>/dev/null)" ]; do \
-		echo -n "."; \
-		sleep 5; \
+	@while [ -z "$$(kubectl get ingress -A -o jsonpath='{.items[*].status.loadBalancer.ingress[0].hostname}' | tr ' ' '\n' | grep -v '^$$' | head -n 1)" ]; do \
+	    echo -n "."; \
+	    sleep 5; \
 	done
 	@echo ""
 	@ALB_HOSTNAME=$$(kubectl get ingress -n frontend -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'); \
@@ -165,8 +165,8 @@ destroy:
 	@echo "=========================================================="
 	@echo " [3/5] Karpenter 스팟 노드 정리 및 인스턴스 완전 종료 대기"
 	@echo "=========================================================="
-	-kubectl delete nodepools --all --timeout=20s 2>/dev/null || true
-	-kubectl delete nodeclaims --all --timeout=20s 2>/dev/null || true
+	-kubectl delete nodepools --all --timeout=60s 2>/dev/null || true
+	-kubectl delete nodeclaims --all --timeout=60s 2>/dev/null || true
 
 	@SPOT_IDS=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 describe-instances \
 		--region $(AWS_REGION) \

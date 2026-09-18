@@ -13,7 +13,7 @@ terraform {
   # ==============================================================================
   backend "s3" {
     bucket         = "issue-tfstate-ap-northeast-2"
-    key            = "iam/terraform.tfstate"       # infra/ 대신 iam/ 경로 사용
+    key            = "iam/terraform.tfstate" # infra/ 대신 iam/ 경로 사용
     region         = "ap-northeast-2"
     dynamodb_table = "issue-tfstate-locks"
     encrypt        = true
