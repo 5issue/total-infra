@@ -174,34 +174,14 @@ redis-credential-verify:
 # ----------------------------------------------------------------
 destroy:
 	@echo "=========================================================="
-	@echo " [1/5] K8s Ingress 및 Application 파이널라이저 안전 해제"
+	@echo " [1/4] K8s Ingress 및 LBC 연동 리소스 선제 정리"
 	@echo "=========================================================="
-	@echo "Ingress 삭제 신호 전달..."
-	-kubectl delete ingress --all -A --ignore-not-found --timeout=20s 2>/dev/null || true
-
-	@echo "Argo CD Application 파이널라이저 강제 해제 및 삭제..."
-	-kubectl get application -n argocd -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | \
-		xargs -r -n 1 kubectl patch application -n argocd -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true
-	-kubectl delete application --all -n argocd --ignore-not-found --timeout=20s 2>/dev/null || true
-
-	@echo "Ingress 파이널라이저 강제 해제..."
-	@for ns in frontend backend dev prometheus argocd; do \
-		for ing in $$(kubectl get ingress -n $$ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do \
-			kubectl patch ingress $$ing -n $$ns -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true; \
-		done \
-	done
+	@export KUBECONFIG=~/.kube/config 2>/dev/null || true
+	-kubectl delete ingress --all -A --timeout=60s 2>/dev/null || true
+	-kubectl delete targetgroupbindings --all -A --timeout=60s 2>/dev/null || true
 
 	@echo "=========================================================="
-	@echo " [2/5] K8s 네임스페이스 파이널라이저 사전 강제 제거 (Terminating 방지)"
-	@echo "=========================================================="
-	@for ns in frontend backend dev argocd prometheus; do \
-		kubectl get ns "$$ns" -o json 2>/dev/null | \
-		python3 -c 'import sys, json; data=json.load(sys.stdin); data["spec"]["finalizers"]=[]; print(json.dumps(data))' | \
-		kubectl replace --raw "/api/v1/namespaces/$$ns/finalize" -f - 2>/dev/null || true; \
-	done
-
-	@echo "=========================================================="
-	@echo " [3/5] Karpenter 스팟 노드 정리 및 인스턴스 완전 종료 대기"
+	@echo " [2/4] Karpenter 스팟 노드 정리 및 인스턴스 완전 종료 대기"
 	@echo "=========================================================="
 	-kubectl delete nodepools --all --timeout=60s 2>/dev/null || true
 	-kubectl delete nodeclaims --all --timeout=60s 2>/dev/null || true
@@ -219,7 +199,7 @@ destroy:
 	@sleep 5
 
 	@echo "=========================================================="
-	@echo " [4/5] AWS ALB, Target Group, ENI 및 k8s 동적 보안 그룹 강제 소멸"
+	@echo " [3/4] AWS ALB, Target Group, ENI 및 k8s 동적 보안 그룹 강제 소멸"
 	@echo "=========================================================="
 	@for alb in $$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-load-balancers --region $(AWS_REGION) --query "LoadBalancers[?contains(LoadBalancerName, 'mainalbgroup') || contains(LoadBalancerName, 'k8s')].LoadBalancerArn" --output text 2>/dev/null); do \
 		echo "ALB 삭제: $$alb"; \
@@ -283,10 +263,11 @@ destroy:
 	fi
 
 	@echo "=========================================================="
-	@echo " [5/5] Infra 메인 스택 Terraform Destroy 실행"
+	@echo " [4/4] Infra 메인 스택 Terraform Destroy 실행"
 	@echo "=========================================================="
 	@cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform destroy -auto-approve
 
+	
 # ----------------------------------------------------------------
 # Scheduler 스택 Plan & 배포 (EventBridge + Lambda)
 # ----------------------------------------------------------------
