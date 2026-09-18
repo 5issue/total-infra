@@ -1,5 +1,16 @@
 SHELL := /bin/bash
 
+MAKEFILE_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+
+# Resolve only the internal default. Caller-provided values remain raw so the
+# workload-publication target can pass them without GNU Make re-expansion.
+ifeq ($(origin TOTAL_K8S_DIR), undefined)
+TOTAL_K8S_DIR := $(abspath $(MAKEFILE_DIR)/../total-k8s)
+endif
+
+# Command-line variables are otherwise exported and recursively expanded by Make.
+unexport ENV COMPONENT PHASE KUBECTL_CONTEXT TOTAL_K8S_DIR
+
 # 두 스택 모두 등록된 IAM 프로파일(596601390909 계정) 사용
 AWS_PROFILE  := target-infra
 AWS_REGION   := ap-northeast-2
@@ -8,7 +19,7 @@ CLUSTER_NAME := test-eks
 # AWS CLI 페이저(less) 비활성화 -> CLI 실행 시 멈춤 현상 원천 차단
 export AWS_PAGER :=
 
-.PHONY: iam-setup iam-plan iam iam-destroy base-plan base base-destroy init plan apply rabbitmq-credential-publish rabbitmq-credential-verify redis-credential-publish redis-credential-verify destroy scheduler-plan scheduler scheduler-destroy
+.PHONY: iam-setup iam-plan iam iam-destroy base-plan base base-destroy init plan apply workload-publication workload-publication-bootstrap rabbitmq-credential-publish rabbitmq-credential-verify redis-credential-publish redis-credential-verify destroy scheduler-plan scheduler scheduler-destroy
 
 # ----------------------------------------------------------------
 # 1. IAM 등록 (최초 1회 실행)
@@ -110,7 +121,37 @@ apply:
 	cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform apply -auto-approve -var="alb_dns_name=$$ALB_HOSTNAME"
 
 # ----------------------------------------------------------------
-# 7. RabbitMQ Application credential publication (독립 운영 작업)
+# Workload publication dispatcher
+# ----------------------------------------------------------------
+workload-publication: export WORKLOAD_PUBLICATION_ENV := $(value ENV)
+workload-publication: export WORKLOAD_PUBLICATION_COMPONENT := $(value COMPONENT)
+workload-publication: export WORKLOAD_PUBLICATION_PHASE := $(value PHASE)
+workload-publication: export WORKLOAD_PUBLICATION_TOTAL_K8S_DIR := $(value TOTAL_K8S_DIR)
+workload-publication: export WORKLOAD_PUBLICATION_KUBECTL_CONTEXT := $(value KUBECTL_CONTEXT)
+workload-publication:
+	@if [[ -z "$${WORKLOAD_PUBLICATION_ENV:-}" || -z "$${WORKLOAD_PUBLICATION_COMPONENT:-}" || -z "$${WORKLOAD_PUBLICATION_PHASE:-}" ]]; then \
+	echo "Usage: make workload-publication ENV=production COMPONENT=<component> PHASE=<phase>"		exit 2; \
+	fi
+	@TOTAL_K8S_DIR="$${WORKLOAD_PUBLICATION_TOTAL_K8S_DIR}" \
+		KUBECTL_CONTEXT="$${WORKLOAD_PUBLICATION_KUBECTL_CONTEXT}" \
+		"$(MAKEFILE_DIR)/scripts/publish-workload-secrets.sh" \
+		"$${WORKLOAD_PUBLICATION_ENV}" "$${WORKLOAD_PUBLICATION_COMPONENT}" "$${WORKLOAD_PUBLICATION_PHASE}"
+
+workload-publication-bootstrap: export WORKLOAD_BOOTSTRAP_ENV := $(value ENV)
+workload-publication-bootstrap: export WORKLOAD_BOOTSTRAP_TOTAL_K8S_DIR := $(value TOTAL_K8S_DIR)
+workload-publication-bootstrap: export WORKLOAD_BOOTSTRAP_KUBECTL_CONTEXT := $(value KUBECTL_CONTEXT)
+workload-publication-bootstrap:
+	@if [[ -z "$${WORKLOAD_BOOTSTRAP_ENV:-}" ]]; then \
+		echo "Usage: make workload-publication-bootstrap ENV=production KUBECTL_CONTEXT=<context>" >&2; \
+		exit 2; \
+	fi
+	@TOTAL_K8S_DIR="$${WORKLOAD_BOOTSTRAP_TOTAL_K8S_DIR}" \
+		KUBECTL_CONTEXT="$${WORKLOAD_BOOTSTRAP_KUBECTL_CONTEXT}" \
+		"$(MAKEFILE_DIR)/scripts/bootstrap-workload-publication.sh" \
+		"$${WORKLOAD_BOOTSTRAP_ENV}"
+
+# ----------------------------------------------------------------
+# 7. Workload credential publication (개별 운영 작업)
 # ----------------------------------------------------------------
 rabbitmq-credential-publish:
 	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
@@ -120,9 +161,6 @@ rabbitmq-credential-verify:
 	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
 		./scripts/publish-rabbitmq-credentials.sh verify
 
-# ----------------------------------------------------------------
-# 8. Redis credential publication (독립 운영 작업)
-# ----------------------------------------------------------------
 redis-credential-publish:
 	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
 		./scripts/publish-redis-credentials.sh publish
@@ -132,7 +170,7 @@ redis-credential-verify:
 		./scripts/publish-redis-credentials.sh verify
 
 # ----------------------------------------------------------------
-# 9. 전체 인프라 안전 파기
+# 8. 전체 인프라 안전 파기
 # ----------------------------------------------------------------
 destroy:
 	@echo "=========================================================="
