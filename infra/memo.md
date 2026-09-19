@@ -34,3 +34,10 @@ if [ -n "$INSTANCE_IDS" ]; then
     echo "기존 인스턴스 강제 종료 완료!"
 fi
 ```
+
+### workload-publication
+```bash
+make workload-publication-bootstrap \
+  ENV=dev \
+  KUBECTL_CONTEXT=$(kubectl config current-context)
+``

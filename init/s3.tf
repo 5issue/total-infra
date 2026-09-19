@@ -43,6 +43,14 @@ resource "aws_s3_bucket_public_access_block" "tfstate" {
   restrict_public_buckets = true
 }
 
+# 계정 전체 S3 퍼블릭 액세스 차단 (3.7 충족용)
+resource "aws_s3_account_public_access_block" "account" {
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
 # tfstate 버킷 ACL 소유자 한정 (BucketOwnerEnforced)
 resource "aws_s3_bucket_ownership_controls" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id

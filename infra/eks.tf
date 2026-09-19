@@ -21,12 +21,30 @@ module "eks" {
   cluster_endpoint_public_access  = true
   cluster_endpoint_private_access = true
 
+  # [보안 요구사항 4.14] EKS 제어 플레인 전체 로깅 활성화
+  # CloudWatch 수집 비용 절감을 위해 평상시 비활성화 유지
+  # cluster_enabled_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
   # 1명만 독점하는 옵션 제거
   enable_cluster_creator_admin_permissions = false
   enable_irsa                              = true
 
-  # 팀원 5명 EKS 클러스터 관리자 권한 발급
+  # EKS 클러스터 관리자 권한 발급
   access_entries = {
+    # CLI / Terraform 스크립트 실행용 공용 관리자 Role (AssumeRole + MFA)
+    target_infra_role = {
+      principal_arn = "arn:aws:iam::596601390909:role/target-infra"
+      policy_associations = {
+        admin = {
+          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+      # 쿠버네티스 내부에서 활동할 그룹 지정
+      kubernetes_groups = ["db-admin-readers"]
+    } 
+    
+    # 팀원 5명 개인 IAM User (웹 콘솔 직접 조회 및 권한 부여)
     jongwon = {
       principal_arn = "arn:aws:iam::596601390909:user/infra-jongwon"
       policy_associations = {
@@ -35,9 +53,9 @@ module "eks" {
           access_scope = { type = "cluster" }
         }
       }
-      # 쿠버네티스 내부에서 활동할 그룹 지정
       kubernetes_groups = ["db-admin-readers"]
     }
+
     youngheon = {
       principal_arn = "arn:aws:iam::596601390909:user/infra-youngheon"
       policy_associations = {
@@ -46,9 +64,9 @@ module "eks" {
           access_scope = { type = "cluster" }
         }
       }
-      # 쿠버네티스 내부에서 활동할 그룹 지정
       kubernetes_groups = ["db-admin-readers"]
     }
+
     mingyu = {
       principal_arn = "arn:aws:iam::596601390909:user/infra-mingyu"
       policy_associations = {
@@ -57,9 +75,9 @@ module "eks" {
           access_scope = { type = "cluster" }
         }
       }
-      # 쿠버네티스 내부에서 활동할 그룹 지정
       kubernetes_groups = ["db-admin-readers"]
     }
+
     jaehyeok = {
       principal_arn = "arn:aws:iam::596601390909:user/infra-jaehyeok"
       policy_associations = {
@@ -68,9 +86,9 @@ module "eks" {
           access_scope = { type = "cluster" }
         }
       }
-      # 쿠버네티스 내부에서 활동할 그룹 지정
       kubernetes_groups = ["db-admin-readers"]
     }
+
     jiyoon = {
       principal_arn = "arn:aws:iam::596601390909:user/infra-jiyoon"
       policy_associations = {
@@ -79,7 +97,6 @@ module "eks" {
           access_scope = { type = "cluster" }
         }
       }
-      # 쿠버네티스 내부에서 활동할 그룹 지정
       kubernetes_groups = ["db-admin-readers"]
     }
   }
@@ -110,12 +127,14 @@ module "eks" {
     # coredns    = { most_recent = true }
     # kube-proxy = { most_recent = true }
     vpc-cni = {
-      most_recent = true
-      configuration_values = jsonencode({
-        enableNetworkPolicy = "true" # VPC CNI NetworkPolicy 엔진 활성화됨
+      before_compute                = true
+      most_recent                   = true
+      service_account_role_arn      = module.vpc_cni_irsa.iam_role_arn
+      configuration_values          = jsonencode({
+        enableNetworkPolicy         = "true" # VPC CNI NetworkPolicy 엔진 활성화됨
         env = {
-          ENABLE_PREFIX_DELEGATION = "true"
-          WARM_PREFIX_TARGET       = "1"
+          ENABLE_PREFIX_DELEGATION  = "true"
+          WARM_PREFIX_TARGET        = "1"
         }
       })
     }
@@ -142,6 +161,9 @@ module "eks" {
       max_size       = 2
       desired_size   = 2
 
+      # 모듈 기본 CNI 정책 자동 부착 방지
+      iam_role_attach_cni_policy = true
+
       # 노드가 시작 템플릿 및 EKS 워커 노드 역할을 수행하는 데 필요한 기본 정책 연결
       iam_role_additional_policies = {
         AmazonEKSWorkerNodePolicy          = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
@@ -153,112 +175,118 @@ module "eks" {
       # ========================================================
       # [핵심] 노드 부팅 시 자동으로 실행되는 보안 강화 스크립트
       # ========================================================
-      pre_bootstrap_user_data = <<-EOT
-        #!/bin/bash
-        set -x
+      cloudinit_pre_nodeadm = [
+        {
+          content_type = "text/x-shellscript"
+          content      = <<-EOT
+            #!/bin/bash
+            set -x
 
-        echo "=== [Security Hardening] Start ==="
+            echo "=== [Security Hardening] Start ==="
 
-        # [U-01] root 계정의 직접 원격 접속 차단
-        mkdir -p /etc/ssh/sshd_config.d
-        cat << 'EOF' > /etc/ssh/sshd_config.d/01-hardening.conf
-        PermitRootLogin no
-        EOF
-        systemctl reload sshd || systemctl restart sshd
+            # [U-01] root 계정의 직접 원격 접속 차단
+            mkdir -p /etc/ssh/sshd_config.d
+            cat << 'EOF' > /etc/ssh/sshd_config.d/01-hardening.conf
+            PermitRootLogin no
+            EOF
+            systemctl reload sshd || systemctl restart sshd
 
-        # [U-02] 패스워드 최소 길이 및 복잡도 설정
-        cat << 'EOF' > /etc/security/pwquality.conf
-        minlen = 8
-        dcredit = -1
-        ucredit = -1
-        lcredit = -1
-        ocredit = -1
-        EOF
+            # [U-02] 패스워드 최소 길이 및 복잡도 설정
+            cat << 'EOF' > /etc/security/pwquality.conf
+            minlen = 8
+            dcredit = -1
+            ucredit = -1
+            lcredit = -1
+            ocredit = -1
+            EOF
 
-        # [U-06] su 명령어는 허가된(wheel) 사용자만 사용
-        sed -i 's/^#\?auth\s\+required\s\+pam_wheel\.so\s\+use_uid/auth required pam_wheel.so use_uid/' /etc/pam.d/su
+            # [U-06] su 명령어는 허가된(wheel) 사용자만 사용
+            sed -i 's/^#\?auth\s\+required\s\+pam_wheel\.so\s\+use_uid/auth required pam_wheel.so use_uid/' /etc/pam.d/su
 
-        # [U-11] 시스템 계정(UID < 1000) 로그인 Shell 차단 (root 제외)
-        awk -F: '($3 < 1000 && $1 != "root" && $7 !~ /(nologin|false)/) {print $1}' /etc/passwd | while read -r user; do
-            usermod -s /sbin/nologin "$user"
-        done
+            # [U-11] 시스템 계정(UID < 1000) 로그인 Shell 차단 (root 제외)
+            awk -F: '($3 < 1000 && $1 != "root" && $7 !~ /(nologin|false)/) {print $1}' /etc/passwd | while read -r user; do
+                usermod -s /sbin/nologin "$user"
+            done
 
-        # [U-12] 비활성 세션 자동 종료 (10분 = 600초 미입력 시 자동 로그아웃)
-        cat << 'EOF' > /etc/profile.d/timeout.sh
-        export TMOUT=600
-        readonly TMOUT
-        EOF
-        chmod 0644 /etc/profile.d/timeout.sh
+            # [U-12] 비활성 세션 자동 종료 (10분 = 600초 미입력 시 자동 로그아웃)
+            cat << 'EOF' > /etc/profile.d/timeout.sh
+            export TMOUT=600
+            readonly TMOUT
+            EOF
+            chmod 0644 /etc/profile.d/timeout.sh
 
-        # [U-13] 패스워드 안전 암호화 저장 (감사 기준 가이드 준수: SHA512)
-        if grep -q "^ENCRYPT_METHOD" /etc/login.defs; then
-            sed -i 's/^ENCRYPT_METHOD.*/ENCRYPT_METHOD SHA512/' /etc/login.defs
-        else
-            echo "ENCRYPT_METHOD SHA512" >> /etc/login.defs
-        fi
+            # [U-13] 패스워드 안전 암호화 저장 (감사 기준 가이드 준수: SHA512)
+            if grep -q "^ENCRYPT_METHOD" /etc/login.defs; then
+                sed -i 's/^ENCRYPT_METHOD.*/ENCRYPT_METHOD SHA512/' /etc/login.defs
+            else
+                echo "ENCRYPT_METHOD SHA512" >> /etc/login.defs
+            fi
 
-        # [U-63] sudo 접근(/etc/sudoers) 권한 관리
-        chown -R root:root /etc/sudoers /etc/sudoers.d
-        chmod 0440 /etc/sudoers
-        chmod 750 /etc/sudoers.d
-        chmod 0440 /etc/sudoers.d/* 2>/dev/null || true
+            # [U-63] sudo 접근(/etc/sudoers) 권한 관리
+            chown -R root:root /etc/sudoers /etc/sudoers.d
+            chmod 0440 /etc/sudoers
+            chmod 750 /etc/sudoers.d
+            chmod 0440 /etc/sudoers.d/* 2>/dev/null || true
 
-        # --------------------------------------------------------
-        # 추가 파일 무결성 및 권한 보안 설정 (U-16 ~ U-67)
-        # --------------------------------------------------------
-        
-        # [U-16, U-18] passwd 및 shadow 파일 권한 및 소유자 설정
-        chown root:root /etc/passwd /etc/shadow
-        chmod 0644 /etc/passwd
-        chmod 0400 /etc/shadow
+            # --------------------------------------------------------
+            # 추가 파일 무결성 및 권한 보안 설정 (U-16 ~ U-67)
+            # --------------------------------------------------------
+            
+            # [U-16, U-18] passwd 및 shadow 파일 권한 및 소유자 설정
+            chown root:root /etc/passwd /etc/shadow
+            chmod 0644 /etc/passwd
+            chmod 0400 /etc/shadow
 
-        # [U-19, U-22] hosts, services 파일 권한 설정
-        chown root:root /etc/hosts /etc/services
-        chmod 0644 /etc/hosts /etc/services
+            # [U-19, U-22] hosts, services 파일 권한 설정
+            chown root:root /etc/hosts /etc/services
+            chmod 0644 /etc/hosts /etc/services
 
-        # [U-20, U-21] xinetd 및 rsyslog 설정 파일 (존재 시에만 적용)
-        [ -f /etc/xinetd.conf ] && chmod 0600 /etc/xinetd.conf && chown root:root /etc/xinetd.conf || true
-        [ -f /etc/rsyslog.conf ] && chmod 0640 /etc/rsyslog.conf && chown root:root /etc/rsyslog.conf || true
+            # [U-20, U-21] xinetd 및 rsyslog 설정 파일 (존재 시에만 적용)
+            [ -f /etc/xinetd.conf ] && chmod 0600 /etc/xinetd.conf && chown root:root /etc/xinetd.conf || true
+            [ -f /etc/rsyslog.conf ] && chmod 0640 /etc/rsyslog.conf && chown root:root /etc/rsyslog.conf || true
 
-        # [U-27, U-29] 레거시 취약 파일 강제 삭제 (hosts.equiv, .rhosts, hosts.lpd)
-        rm -f /etc/hosts.equiv /root/.rhosts /etc/hosts.lpd
+            # [U-27, U-29] 레거시 취약 파일 강제 삭제 (hosts.equiv, .rhosts, hosts.lpd)
+            rm -f /etc/hosts.equiv /root/.rhosts /etc/hosts.lpd
 
-        # [U-30] 기본 UMASK 022 명시 설정
-        sed -i -E 's/UMASK\s+[0-9]+/UMASK 022/' /etc/login.defs || true
+            # [U-30] 기본 UMASK 022 명시 설정
+            sed -i -E 's/UMASK\s+[0-9]+/UMASK 022/' /etc/login.defs || true
 
-        # [U-34 ~ U-52] 불필요 및 취약 데몬/소켓 비활성화
-        # AL2023에 미설치되어 있으나, 감사 통과 및 예방 차원의 즉시 비활성화
-        systemctl disable --now finger.socket rsh.socket rlogin.socket rexec.socket \
-          echo-stream.socket echo-dgram.socket discard-stream.socket discard-dgram.socket \
-          daytime-stream.socket daytime-dgram.socket tftp.socket telnet.socket 2>/dev/null || true
+            # [U-34 ~ U-52] 불필요 및 취약 데몬/소켓 비활성화
+            # AL2023에 미설치되어 있으나, 감사 통과 및 예방 차원의 즉시 비활성화
+            systemctl disable --now finger.socket rsh.socket rlogin.socket rexec.socket \
+              echo-stream.socket echo-dgram.socket discard-stream.socket discard-dgram.socket \
+              daytime-stream.socket daytime-dgram.socket tftp.socket telnet.socket 2>/dev/null || true
 
-        # [U-48] SMTP 서비스 비활성화 및 VRFY 명령어 차단 설정 (U-48 대응)
-        systemctl disable --now postfix sendmail 2>/dev/null || true
-        if [ -f /etc/postfix/main.cf ]; then
-            grep -q "^disable_vrfy_command" /etc/postfix/main.cf && \
-              sed -i 's/^disable_vrfy_command.*/disable_vrfy_command = yes/' /etc/postfix/main.cf || \
-              echo "disable_vrfy_command = yes" >> /etc/postfix/main.cf
-        fi
+            # [U-48] SMTP 서비스 비활성화 및 VRFY 명령어 차단 설정 (U-48 대응)
+            systemctl disable --now postfix sendmail 2>/dev/null || true
+            if [ -f /etc/postfix/main.cf ]; then
+                grep -q "^disable_vrfy_command" /etc/postfix/main.cf && \
+                  sed -i 's/^disable_vrfy_command.*/disable_vrfy_command = yes/' /etc/postfix/main.cf || \
+                  echo "disable_vrfy_command = yes" >> /etc/postfix/main.cf
+            fi
 
-        # [U-53, U-55] FTP 서비스 비활성화, 배너 노출 제한 및 쉘 격리 (U-53, U-55 대응)
-        systemctl disable --now vsftpd proftpd 2>/dev/null || true
-        if [ -f /etc/vsftpd/vsftpd.conf ]; then
-            grep -q "^ftpd_banner" /etc/vsftpd/vsftpd.conf && \
-              sed -i 's/^ftpd_banner.*/ftpd_banner=Authorized Users Only/' /etc/vsftpd/vsftpd.conf || \
-              echo "ftpd_banner=Authorized Users Only" >> /etc/vsftpd/vsftpd.conf
-        fi
-        if id ftp &>/dev/null; then
-            usermod -s /sbin/nologin ftp || true
-        fi
+            # [U-53, U-55] FTP 서비스 비활성화, 배너 노출 제한 및 쉘 격리 (U-53, U-55 대응)
+            systemctl disable --now vsftpd proftpd 2>/dev/null || true
+            if [ -f /etc/vsftpd/vsftpd.conf ]; then
+                grep -q "^ftpd_banner" /etc/vsftpd/vsftpd.conf && \
+                  sed -i 's/^ftpd_banner.*/ftpd_banner=Authorized Users Only/' /etc/vsftpd/vsftpd.conf || \
+                  echo "ftpd_banner=Authorized Users Only" >> /etc/vsftpd/vsftpd.conf
+            fi
+            if id ftp &>/dev/null; then
+                usermod -s /sbin/nologin ftp || true
+            fi
 
-        # [U-67] 주요 로그 파일 소유권 및 상세 권한 보강
-        chown -R root:root /var/log/
-        find /var/log -type f -exec chmod go-w {} + 2>/dev/null || true
-        # 보안 감사 핵심 파일 640 적용
-        chmod 0640 /var/log/messages /var/log/secure /var/log/audit/audit.log 2>/dev/null || true
-        
-        echo "=== [Security Hardening] Complete ==="
-      EOT
+            # [U-67] 주요 로그 파일 소유권 및 상세 권한 보강
+            find /var/log -type f -exec chmod go-w {} + 2>/dev/null || true
+            # 보안 감사 핵심 파일 640 적용
+            chmod 0640 /var/log/messages /var/log/secure /var/log/audit/audit.log 2>/dev/null || true
+            
+            echo "=== [Security Hardening] Complete ==="
+          EOT
+        }
+      ]
+
+
     }
   }
 

@@ -12,6 +12,7 @@ readonly -a approved_caller_arns=(
   "arn:aws:iam::596601390909:user/infra-mingyu"
   "arn:aws:iam::596601390909:user/infra-jaehyeok"
   "arn:aws:iam::596601390909:user/infra-jiyoon"
+  "arn:aws:sts::596601390909:assumed-role/target-infra"
 )
 
 fail() {
@@ -84,7 +85,7 @@ unset caller_identity
 
 caller_is_approved=false
 for approved_caller_arn in "${approved_caller_arns[@]}"; do
-  if [[ "$caller_arn" == "$approved_caller_arn" ]]; then
+  if [[ "$caller_arn" == "$approved_caller_arn"* ]]; then
     caller_is_approved=true
     break
   fi
