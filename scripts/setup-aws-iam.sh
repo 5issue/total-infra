@@ -62,6 +62,7 @@ echo "[INFO] ~/.aws/config 에 '$PROFILE_NAME' AssumeRole 프로필 설정 중..
 aws configure set source_profile "personal" --profile "$PROFILE_NAME"
 aws configure set role_arn "$ROLE_ARN" --profile "$PROFILE_NAME"
 aws configure set mfa_serial "$MFA_ARN" --profile "$PROFILE_NAME"
+aws configure set duration_seconds 43200 --profile "$PROFILE_NAME"
 aws configure set region "$REGION" --profile "$PROFILE_NAME"
 aws configure set output json --profile "$PROFILE_NAME"
 
