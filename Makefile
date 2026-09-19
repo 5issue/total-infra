@@ -19,6 +19,13 @@ CLUSTER_NAME := test-eks
 # AWS CLI 페이저(less) 비활성화 -> CLI 실행 시 멈춤 현상 원천 차단
 export AWS_PAGER :=
 
+# AWS 임시 세션을 환경 변수로 주입한 뒤 지정된 디렉토리에서 테라폼 명령어를 실행하는 공통 매크로
+define run-tf
+	@eval $$(aws configure export-credentials --profile $(AWS_PROFILE) --format env) && \
+	cd $(1) && \
+	$(2)
+endef
+
 .PHONY: iam-setup iam-plan iam iam-destroy base-plan base base-destroy init plan apply workload-publication workload-publication-bootstrap rabbitmq-credential-publish rabbitmq-credential-verify redis-credential-publish redis-credential-verify destroy scheduler-plan scheduler scheduler-destroy
 
 # ----------------------------------------------------------------
@@ -35,19 +42,19 @@ iam-plan:
 	@echo "=========================================================="
 	@echo " [IAM] 전역 IAM / KMS Plan 실행 (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
-	@cd iam && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform plan
+	$(call run-tf,iam,terraform init && terraform plan)
 
 iam:
 	@echo "=========================================================="
 	@echo " [IAM] 전역 IAM / KMS 배포 (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
-	@cd iam && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform apply -auto-approve
+	$(call run-tf,iam,terraform init && terraform apply -auto-approve)
 
 iam-destroy:
 	@echo "=========================================================="
 	@echo " [IAM] 전역 IAM 리소스 Destroy (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
-	@cd iam && export AWS_PROFILE=$(AWS_PROFILE) && terraform destroy -auto-approve
+	$(call run-tf,iam,terraform destroy -auto-approve)
 
 # ----------------------------------------------------------------
 # 3. Init 스택 Plan & 배포 (공통 기반 리소스)
@@ -56,20 +63,20 @@ base-plan:
 	@echo "=========================================================="
 	@echo " [Init] 공통 기반 리소스 Plan 실행 (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
-	@cd init && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform plan
+	$(call run-tf,init,terraform init && terraform plan)
 
 base:
 	@echo "=========================================================="
 	@echo " [Init] 공통 기반 리소스 배포 (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
-	@cd init && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform apply -auto-approve
+	$(call run-tf,init,terraform init && terraform apply -auto-approve)
 
 # Init 스택 전용 파기 (공통 기반 리소스 전체)
 base-destroy:
 	@echo "=========================================================="
 	@echo " [Init] 공통 기반 리소스 Destroy (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
-	@cd init && export AWS_PROFILE=$(AWS_PROFILE) && terraform destroy -auto-approve
+	$(call run-tf,init,terraform destroy -auto-approve)
 
 # ----------------------------------------------------------------
 # 4. Infra 스택 전용 Init
@@ -78,7 +85,7 @@ init:
 	@echo "=========================================================="
 	@echo " [Infra] Terraform Init 실행 (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
-	@cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform init
+	$(call run-tf,infra,terraform init)
 
 # ----------------------------------------------------------------
 # 5. Infra 스택 Plan 검증
@@ -87,7 +94,7 @@ plan:
 	@echo "=========================================================="
 	@echo " [Infra] 메인 인프라 Plan 실행 (Profile: $(AWS_PROFILE))"
 	@echo "=========================================================="
-	@cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform plan
+	$(call run-tf,infra,terraform init && terraform plan)
 
 # ----------------------------------------------------------------
 # 6. Infra 메인 스택 배포 (VPC/EKS -> Ingress 대기 -> CloudFront 연동)
@@ -96,7 +103,7 @@ apply:
 	@echo "=========================================================="
 	@echo " [1/3] 기본 인프라(VPC, EKS 등) 1차 프로비저닝"
 	@echo "=========================================================="
-	@cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform apply -auto-approve
+	$(call run-tf,infra,terraform init && terraform apply -auto-approve)
 
 	@echo "=========================================================="
 	@echo " 최신 EKS 클러스터 접속 정보(kubeconfig) 동기화"
@@ -118,7 +125,7 @@ apply:
 	echo "=========================================================="; \
 	echo " [3/3] CloudFront & Route 53 생성 (ALB DNS 연동)"; \
 	echo "=========================================================="; \
-	cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform apply -auto-approve -var="alb_dns_name=$$ALB_HOSTNAME"
+	$(call run-tf,infra,terraform apply -auto-approve -var="alb_dns_name=$$ALB_HOSTNAME")
 
 # ----------------------------------------------------------------
 # Workload publication dispatcher
@@ -265,17 +272,16 @@ destroy:
 	@echo "=========================================================="
 	@echo " [4/4] Infra 메인 스택 Terraform Destroy 실행"
 	@echo "=========================================================="
-	@cd infra && export AWS_PROFILE=$(AWS_PROFILE) && terraform destroy -auto-approve
-
+	$(call run-tf,infra,terraform destroy -auto-approve)
 	
 # ----------------------------------------------------------------
 # Scheduler 스택 Plan & 배포 (EventBridge + Lambda)
 # ----------------------------------------------------------------
 scheduler-plan:
-	@cd scheduler && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform plan
+	$(call run-tf,scheduler,terraform init && terraform plan)
 
 scheduler:
-	@cd scheduler && export AWS_PROFILE=$(AWS_PROFILE) && terraform init && terraform apply -auto-approve
+	$(call run-tf,scheduler,terraform init && terraform apply -auto-approve)
 
 scheduler-destroy:
-	@cd scheduler && export AWS_PROFILE=$(AWS_PROFILE) && terraform destroy -auto-approve
+	$(call run-tf,scheduler,terraform destroy -auto-approve)

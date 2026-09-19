@@ -28,15 +28,15 @@ module "eks" {
   # 팀원 5명 + 배포 전용 mgmt 계정에 EKS 클러스터 관리자 권한 발급
   access_entries = {
     # mgmt 자동화 계정이 EKS 및 kubectl을 제어할 수 있도록 권한 부여
-    mgmt_automation = {
-      principal_arn = "arn:aws:iam::596601390909:user/mgmt-automation-user"
-      policy_associations = {
-        admin = {
-          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = { type = "cluster" }
-        }
-      }
-    }
+    # mgmt_automation = {
+    #   principal_arn = "arn:aws:iam::596601390909:user/mgmt-automation-user"
+    #   policy_associations = {
+    #     admin = {
+    #       policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+    #       access_scope = { type = "cluster" }
+    #     }
+    #   }
+    # }
 
     jongwon = {
       principal_arn = "arn:aws:iam::596601390909:user/infra-jongwon"
