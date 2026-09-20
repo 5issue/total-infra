@@ -9,7 +9,7 @@ readonly EXPECTED_AWS_ACCOUNT_ID="596601390909"
 readonly EXPECTED_AWS_REGION="ap-northeast-2"
 readonly EXPECTED_EKS_CLUSTER_NAME="test-eks"
 readonly SECRET_NAME="prod/total/redis-credentials"
-readonly KUBERNETES_NAMESPACE="backend"
+readonly -a KUBERNETES_NAMESPACES=("backend" "dev")
 readonly KUBERNETES_SECRET_NAME="redis-credentials"
 readonly SOURCE_SECRET_ANNOTATION="total.io/source-secret"
 readonly SOURCE_VERSION_ANNOTATION="total.io/source-version-id"
@@ -22,6 +22,7 @@ readonly EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-$EXPECTED_EKS_CLUSTER_NAME}"
 secret_payload=""
 source_version_id=""
 expected_eks_endpoint=""
+kubectl_context=""
 
 cleanup() {
   unset secret_payload
@@ -101,24 +102,32 @@ aws_preflight() {
 }
 
 kubernetes_preflight() {
-  local current_context current_server kube_exec_command kube_exec_cluster
+  local requested_context configured_context current_server kube_exec_command kube_exec_cluster
   local kube_exec_profile kube_exec_role kube_exec_region
+  local namespace
 
-  if ! current_context="$(kubectl config current-context 2>/dev/null)"; then
-    die "현재 kubeconfig context를 확인할 수 없습니다."
+  requested_context="${KUBECTL_CONTEXT:-}"
+  if [[ -n "$requested_context" ]]; then
+    kubectl_context="$requested_context"
+  elif ! kubectl_context="$(kubectl config current-context 2>/dev/null)"; then
+    die "kubeconfig context를 확인할 수 없습니다. KUBECTL_CONTEXT를 지정하세요."
   fi
-  [[ -n "$current_context" ]] || die "현재 kubeconfig context가 비어 있습니다."
+  [[ -n "$kubectl_context" ]] || die "kubeconfig context가 비어 있습니다."
 
-  current_server="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
+  configured_context="$(kubectl config get-contexts "$kubectl_context" -o name 2>/dev/null || true)"
+  [[ "$configured_context" == "$kubectl_context" ]] || \
+    die "kubeconfig context가 존재하지 않습니다: $kubectl_context"
+
+  current_server="$(kubectl --context "$kubectl_context" config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
   [[ "$current_server" == "$expected_eks_endpoint" ]] || \
-    die "현재 kubeconfig context가 대상 EKS endpoint와 일치하지 않습니다."
+    die "kubeconfig context가 대상 EKS endpoint와 일치하지 않습니다."
 
-  kube_exec_command="$(kubectl config view --minify -o jsonpath='{.users[0].user.exec.command}')"
+  kube_exec_command="$(kubectl --context "$kubectl_context" config view --minify -o jsonpath='{.users[0].user.exec.command}')"
   [[ "$(basename -- "$kube_exec_command")" == "aws" ]] || \
     die "현재 kubeconfig context가 AWS exec authentication을 사용하지 않습니다."
 
   kube_exec_cluster="$(
-    kubectl config view --minify -o json | jq -r '
+    kubectl --context "$kubectl_context" config view --minify -o json | jq -r '
       .users[0].user.exec.args as $args
       | ($args | index("--cluster-name")) as $index
       | if $index == null then "" else $args[$index + 1] end
@@ -128,7 +137,7 @@ kubernetes_preflight() {
     die "kubeconfig exec cluster가 repository 계약과 다릅니다."
 
   kube_exec_region="$(
-    kubectl config view --minify -o json | jq -r '
+    kubectl --context "$kubectl_context" config view --minify -o json | jq -r '
       .users[0].user.exec.args as $args
       | ($args | index("--region")) as $index
       | if $index == null then "" else $args[$index + 1] end
@@ -138,7 +147,7 @@ kubernetes_preflight() {
     die "kubeconfig exec region이 repository 계약과 다릅니다."
 
   kube_exec_profile="$(
-    kubectl config view --minify -o json | jq -r '
+    kubectl --context "$kubectl_context" config view --minify -o json | jq -r '
       [.users[0].user.exec.env[]? | select(.name == "AWS_PROFILE") | .value][0] // ""
     '
   )"
@@ -146,7 +155,7 @@ kubernetes_preflight() {
     die "kubeconfig exec profile이 요청된 AWS profile과 다릅니다."
 
   kube_exec_role="$(
-    kubectl config view --minify -o json | jq -r '
+    kubectl --context "$kubectl_context" config view --minify -o json | jq -r '
       .users[0].user.exec.args as $args
       | ($args | index("--role-arn")) as $index
       | if $index == null then "" else $args[$index + 1] end
@@ -155,12 +164,15 @@ kubernetes_preflight() {
   [[ -z "$kube_exec_role" ]] || \
     die "repository에 정의되지 않은 kubeconfig role override가 있습니다."
 
-  if ! kubectl --request-timeout="$KUBECTL_REQUEST_TIMEOUT" \
-    get namespace "$KUBERNETES_NAMESPACE" -o name >/dev/null; then
-    die "Namespace가 없거나 접근할 수 없습니다: $KUBERNETES_NAMESPACE"
-  fi
+  for namespace in "${KUBERNETES_NAMESPACES[@]}"; do
+    if ! kubectl --context "$kubectl_context" \
+      --request-timeout="$KUBECTL_REQUEST_TIMEOUT" \
+      get namespace "$namespace" -o name >/dev/null; then
+      die "Namespace가 없거나 접근할 수 없습니다: $namespace"
+    fi
+  done
 
-  log "Kubernetes preflight 완료: context=$current_context"
+  log "Kubernetes preflight 완료: context=$kubectl_context"
 }
 
 resolve_secret_version() {
@@ -220,8 +232,10 @@ load_secret_payload() {
 }
 
 publish_secret() {
+  local namespace="$1"
+
   if ! printf '%s' "$secret_payload" | jq -c \
-    --arg namespace "$KUBERNETES_NAMESPACE" \
+    --arg namespace "$namespace" \
     --arg secret_name "$KUBERNETES_SECRET_NAME" \
     --arg source_secret "$SECRET_NAME" \
     --arg source_version "$source_version_id" \
@@ -243,23 +257,26 @@ publish_secret() {
           password: (.password | @base64)
         }
       }
-    ' | kubectl --request-timeout="$KUBECTL_REQUEST_TIMEOUT" apply \
+    ' | kubectl --context "$kubectl_context" \
+      --request-timeout="$KUBECTL_REQUEST_TIMEOUT" apply \
       --server-side \
       --field-manager=redis-credential-publisher \
       -f - >/dev/null; then
-    die "Kubernetes Secret publication에 실패했습니다: ${KUBERNETES_NAMESPACE}/${KUBERNETES_SECRET_NAME}"
+    die "Kubernetes Secret publication에 실패했습니다: ${namespace}/${KUBERNETES_SECRET_NAME}"
   fi
 
-  log "Kubernetes Secret publication 완료: ${KUBERNETES_NAMESPACE}/${KUBERNETES_SECRET_NAME}"
+  log "Kubernetes Secret publication 완료: ${namespace}/${KUBERNETES_SECRET_NAME}"
 }
 
 verify_secret() {
+  local namespace="$1"
   local summary secret_type source_secret source_version has_exact_keys
 
   if ! summary="$(
-    kubectl --request-timeout="$KUBECTL_REQUEST_TIMEOUT" \
+    kubectl --context "$kubectl_context" \
+      --request-timeout="$KUBECTL_REQUEST_TIMEOUT" \
       get secret "$KUBERNETES_SECRET_NAME" \
-      --namespace "$KUBERNETES_NAMESPACE" \
+      --namespace "$namespace" \
       -o json | jq -er \
         --arg source_secret_annotation "$SOURCE_SECRET_ANNOTATION" \
         --arg source_version_annotation "$SOURCE_VERSION_ANNOTATION" '
@@ -271,33 +288,43 @@ verify_secret() {
           ] | join("|")
         '
   )"; then
-    die "Kubernetes Secret 검증 조회에 실패했습니다: ${KUBERNETES_NAMESPACE}/${KUBERNETES_SECRET_NAME}"
+    die "Kubernetes Secret 검증 조회에 실패했습니다: ${namespace}/${KUBERNETES_SECRET_NAME}"
   fi
 
   IFS='|' read -r secret_type source_secret source_version has_exact_keys <<<"$summary"
-  [[ "$secret_type" == "Opaque" ]] || die "Secret type 검증 실패: $KUBERNETES_NAMESPACE"
+  [[ "$secret_type" == "Opaque" ]] || die "Secret type 검증 실패: $namespace"
   [[ "$source_secret" == "$SECRET_NAME" ]] || \
-    die "source-secret annotation 검증 실패: $KUBERNETES_NAMESPACE"
+    die "source-secret annotation 검증 실패: $namespace"
   [[ "$source_version" == "$source_version_id" ]] || \
-    die "현재 AWSCURRENT와 source-version-id가 일치하지 않습니다: $KUBERNETES_NAMESPACE"
+    die "현재 AWSCURRENT와 source-version-id가 일치하지 않습니다: $namespace"
   [[ "$has_exact_keys" == "true" ]] || \
-    die "Kubernetes Secret key schema가 정확히 password 하나가 아닙니다: $KUBERNETES_NAMESPACE"
+    die "Kubernetes Secret key schema가 정확히 password 하나가 아닙니다: $namespace"
 
-  log "Kubernetes Secret metadata/key 및 AWSCURRENT 일치 검증 완료: ${KUBERNETES_NAMESPACE}/${KUBERNETES_SECRET_NAME}"
+  log "Kubernetes Secret metadata/key 및 AWSCURRENT 일치 검증 완료: ${namespace}/${KUBERNETES_SECRET_NAME}"
 }
 
 publish() {
+  local namespace
+
   resolve_secret_version
   load_secret_payload
-  publish_secret
-  verify_secret
+  for namespace in "${KUBERNETES_NAMESPACES[@]}"; do
+    publish_secret "$namespace"
+  done
+  for namespace in "${KUBERNETES_NAMESPACES[@]}"; do
+    verify_secret "$namespace"
+  done
   log "고정한 source VersionId의 Redis credential publication 완료"
 }
 
 verify() {
+  local namespace
+
   resolve_secret_version
-  verify_secret
-  log "Redis Secret publication 상태가 현재 AWSCURRENT와 일치합니다."
+  for namespace in "${KUBERNETES_NAMESPACES[@]}"; do
+    verify_secret "$namespace"
+  done
+  log "모든 Redis Secret publication 상태가 현재 AWSCURRENT와 일치합니다."
 }
 
 main() {
