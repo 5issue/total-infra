@@ -35,9 +35,20 @@ if [ -n "$INSTANCE_IDS" ]; then
 fi
 ```
 
-### workload-publication
+### workload-publication-bootstrap
 ```bash
 make workload-publication-bootstrap \
-  ENV=dev \
-  KUBECTL_CONTEXT=$(kubectl config current-context)
-``
+  ENV=production \
+  KUBECTL_CONTEXT=arn:aws:eks:ap-northeast-2:596601390909:cluster/test-eks
+```
+
+### rabbitmq-app-credentials
+```bash
+make rabbitmq-credential-publish
+```
+
+### Redis credential만 개별 실행
+```bash
+make redis-credential-publish
+make redis-credential-verify
+```

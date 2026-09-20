@@ -157,7 +157,7 @@ kubernetes_preflight() {
   [[ -z "$kube_exec_role" ]] || \
     die "repository에 정의되지 않은 kubeconfig role override가 있습니다."
 
-  for namespace in messaging backend; do
+  for namespace in messaging backend dev; do
     if ! kubectl --request-timeout="$KUBECTL_REQUEST_TIMEOUT" get namespace "$namespace" -o name >/dev/null; then
       die "Namespace가 없거나 접근할 수 없습니다: $namespace"
     fi
@@ -299,6 +299,9 @@ publish() {
   publish_secret backend
   verify_secret backend "$source_version_id"
 
+  publish_secret dev
+  verify_secret dev "$source_version_id"
+
   log "동일한 source VersionId의 RabbitMQ credential publication 완료"
 }
 
@@ -311,10 +314,13 @@ verify() {
   verify_secret backend
   backend_version="$verified_version_id"
 
-  [[ "$messaging_version" == "$backend_version" ]] || \
-    die "두 Namespace의 source-version-id가 일치하지 않습니다."
+  verify_secret dev
+  dev_version="$verified_version_id"
 
-  log "두 Namespace의 RabbitMQ Secret publication 상태가 일치합니다."
+  [[ "$messaging_version" == "$backend_version" && "$backend_version" == "$dev_version" ]] || \
+    die "Namespace들의 source-version-id가 일치하지 않습니다."
+
+  log "모든 Namespace의 RabbitMQ Secret publication 상태가 일치합니다."
 }
 
 main() {
