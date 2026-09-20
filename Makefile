@@ -182,18 +182,32 @@ redis-credential-verify:
 # ----------------------------------------------------------------
 destroy:
 	@echo "=========================================================="
-	@echo " [1/4] K8s Ingress 및 LBC 연동 리소스 선제 정리"
+	@echo " [1/5] K8s 리소스 선제 정리 및 Finalizer 해제"
 	@echo "=========================================================="
-	@export KUBECONFIG=~/.kube/config 2>/dev/null || true
-	-kubectl delete ingress --all -A --timeout=60s 2>/dev/null || true
-	-kubectl delete targetgroupbindings --all -A --timeout=60s 2>/dev/null || true
+	@export KUBECONFIG=~/.kube/config 2>/dev/null || true; \
+	kubectl delete ingress --all -A --timeout=60s 2>/dev/null || true; \
+	kubectl delete targetgroupbindings --all -A --timeout=60s 2>/dev/null || true; \
+	kubectl delete nodepools --all --timeout=60s 2>/dev/null || true; \
+	kubectl delete nodeclaims --all --timeout=60s 2>/dev/null || true; \
+	\
+	for TYPE in ingress targetgroupbindings.elbv2.k8s.aws applications.argoproj.io; do \
+		kubectl get $$TYPE -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null | \
+		while read NS NAME; do \
+			[ -z "$$NAME" ] || kubectl patch $$TYPE "$$NAME" -n "$$NS" \
+				--type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
+		done; \
+	done; \
+	\
+	for NS in $$(kubectl get ns --field-selector status.phase=Terminating -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do \
+		echo "네임스페이스 finalizer 해제: $$NS"; \
+		kubectl get ns "$$NS" -o json 2>/dev/null | \
+		jq '.spec.finalizers = []' | \
+		kubectl replace --raw "/api/v1/namespaces/$$NS/finalize" -f - 2>/dev/null || true; \
+	done
 
 	@echo "=========================================================="
-	@echo " [2/4] Karpenter 스팟 노드 정리 및 인스턴스 완전 종료 대기"
+	@echo " [2/5] Karpenter 스팟 노드 정리 및 인스턴스 종료 대기"
 	@echo "=========================================================="
-	-kubectl delete nodepools --all --timeout=60s 2>/dev/null || true
-	-kubectl delete nodeclaims --all --timeout=60s 2>/dev/null || true
-
 	@SPOT_IDS=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 describe-instances \
 		--region $(AWS_REGION) \
 		--filters "Name=tag:karpenter.sh/nodepool,Values=*" "Name=instance-state-name,Values=pending,running,shutting-down,stopping,stopped" \
@@ -207,7 +221,7 @@ destroy:
 	@sleep 5
 
 	@echo "=========================================================="
-	@echo " [3/4] AWS ALB, Target Group, ENI 선제 소멸"
+	@echo " [3/5] AWS ALB 및 Target Group 선제 소멸"
 	@echo "=========================================================="
 	@for alb in $$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-load-balancers --region $(AWS_REGION) --query "LoadBalancers[?contains(LoadBalancerName, 'mainalbgroup') || contains(LoadBalancerName, 'k8s')].LoadBalancerArn" --output text 2>/dev/null); do \
 		echo "ALB 삭제: $$alb"; \
@@ -220,78 +234,60 @@ destroy:
 	done
 
 	@echo "=========================================================="
-	@echo " K8s Load Balancer 보안 그룹 정리"
+	@echo " [4/5] K8s 잔여 보안 그룹(LBC 공유 SG 포함) 및 ENI 강제 정리"
 	@echo "=========================================================="
-	@set -euo pipefail; \
-	command -v jq >/dev/null || { echo "jq가 필요합니다."; exit 1; }; \
-	CREDS=$$(aws configure export-credentials --profile "$(AWS_PROFILE)" --format env); \
-	eval "$$CREDS"; \
-	VPC_ID=$$(terraform -chdir=infra state pull | jq -er \
-		'[.resources[] | select(.mode == "managed" and .type == "aws_vpc" and .name == "main" and (.module // "") == "") | .instances[] | .attributes.id | select(type == "string")] | unique | if length == 1 then .[0] else error("state에서 루트 aws_vpc.main을 하나로 식별하지 못했습니다.") end'); \
-	if [[ ! "$$VPC_ID" =~ ^vpc-([0-9a-f]{8}|[0-9a-f]{17})$$ ]]; then \
-		echo "올바르지 않은 VPC ID: $$VPC_ID"; \
-		exit 1; \
-	fi; \
-	echo "대상 VPC: $$VPC_ID"; \
-	SGS=$$(aws ec2 describe-security-groups \
-		--region $(AWS_REGION) \
-		--filters "Name=vpc-id,Values=$$VPC_ID" \
-		--query "SecurityGroups[?starts_with(GroupName, 'k8s-')].GroupId" \
-		--output text); \
-	if [ -z "$$SGS" ]; then \
-		echo "삭제할 k8s-* 보안 그룹이 없습니다."; \
-		exit 0; \
-	fi; \
-	echo "삭제 대상 K8s 보안 그룹: $$SGS"; \
-	for SG in $$SGS; do \
-		ENIS=$$(aws ec2 describe-network-interfaces \
-			--region $(AWS_REGION) \
-			--filters "Name=group-id,Values=$$SG" \
-			--query 'NetworkInterfaces[].NetworkInterfaceId' \
-			--output text); \
-		if [ -n "$$ENIS" ]; then \
-			echo "보안 그룹 $$SG 를 사용하는 ENI가 남아 있습니다:"; \
-			echo "$$ENIS"; \
-			exit 1; \
-		fi; \
-	done; \
-	for SG in $$SGS; do \
-		IN_RULES=$$(aws ec2 describe-security-groups \
-			--region $(AWS_REGION) --group-ids "$$SG" \
-			--query 'SecurityGroups[0].IpPermissions' --output json); \
-		if [ "$$IN_RULES" != "[]" ] && [ "$$IN_RULES" != "null" ]; then \
-			aws ec2 revoke-security-group-ingress \
-				--region $(AWS_REGION) --group-id "$$SG" \
-				--ip-permissions "$$IN_RULES"; \
-		fi; \
-		OUT_RULES=$$(aws ec2 describe-security-groups \
-			--region $(AWS_REGION) --group-ids "$$SG" \
-			--query 'SecurityGroups[0].IpPermissionsEgress' --output json); \
-		if [ "$$OUT_RULES" != "[]" ] && [ "$$OUT_RULES" != "null" ]; then \
-			aws ec2 revoke-security-group-egress \
-				--region $(AWS_REGION) --group-id "$$SG" \
-				--ip-permissions "$$OUT_RULES"; \
-		fi; \
-	done; \
-	for SG in $$SGS; do \
-		echo "보안 그룹 삭제: $$SG"; \
-		aws ec2 delete-security-group --region $(AWS_REGION) --group-id "$$SG"; \
-	done
-
-	@echo "=========================================================="
-	@echo " K8s finalizer 정리"
-	@echo "=========================================================="
-	@for TYPE in ingress targetgroupbindings.elbv2.k8s.aws applications.argoproj.io; do \
-		kubectl get $$TYPE -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null | \
-		while read NS NAME; do \
-			[ -z "$$NAME" ] || kubectl patch $$TYPE "$$NAME" -n "$$NS" \
-				--type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
+	@eval $$(aws configure export-credentials --profile $(AWS_PROFILE) --format env); \
+	VPC_ID=$$(terraform -chdir=infra state pull 2>/dev/null | jq -r \
+		'[.resources[] | select(.type == "aws_vpc") | .instances[].attributes.id] | .[0] // empty'); \
+	if [ -n "$$VPC_ID" ]; then \
+		echo "대상 VPC: $$VPC_ID"; \
+		SGS=$$(aws ec2 describe-security-groups --region $(AWS_REGION) \
+			--filters "Name=vpc-id,Values=$$VPC_ID" \
+			--query "SecurityGroups[?starts_with(GroupName, 'k8s-')].GroupId" --output text); \
+		for SG in $$SGS; do \
+			echo "보안 그룹 규칙 초기화: $$SG"; \
+			IN_RULES=$$(aws ec2 describe-security-groups --region $(AWS_REGION) --group-ids "$$SG" --query 'SecurityGroups[0].IpPermissions' --output json 2>/dev/null); \
+			if [ "$$IN_RULES" != "[]" ] && [ "$$IN_RULES" != "null" ]; then \
+				aws ec2 revoke-security-group-ingress --region $(AWS_REGION) --group-id "$$SG" --ip-permissions "$$IN_RULES" 2>/dev/null || true; \
+			fi; \
+			OUT_RULES=$$(aws ec2 describe-security-groups --region $(AWS_REGION) --group-ids "$$SG" --query 'SecurityGroups[0].IpPermissionsEgress' --output json 2>/dev/null); \
+			if [ "$$OUT_RULES" != "[]" ] && [ "$$OUT_RULES" != "null" ]; then \
+				aws ec2 revoke-security-group-egress --region $(AWS_REGION) --group-id "$$SG" --ip-permissions "$$OUT_RULES" 2>/dev/null || true; \
+			fi; \
 		done; \
-	done
+		for SG in $$SGS; do \
+			NODE_INSTANCES=$$(aws ec2 describe-network-interfaces --region $(AWS_REGION) \
+				--filters "Name=group-id,Values=$$SG" \
+				--query 'NetworkInterfaces[?Attachment.InstanceId != null].Attachment.InstanceId' --output text 2>/dev/null); \
+			if [ -n "$$NODE_INSTANCES" ]; then \
+				echo "보안 그룹 $$SG 를 물고 있는 잔여 인스턴스 종료: $$NODE_INSTANCES"; \
+				aws ec2 terminate-instances --instance-ids $$NODE_INSTANCES --region $(AWS_REGION) 2>/dev/null || true; \
+				aws ec2 wait instance-terminated --instance-ids $$NODE_INSTANCES --region $(AWS_REGION) 2>/dev/null || true; \
+			fi; \
+			ENIS=$$(aws ec2 describe-network-interfaces --region $(AWS_REGION) \
+				--filters "Name=group-id,Values=$$SG" \
+				--query 'NetworkInterfaces[].NetworkInterfaceId' --output text 2>/dev/null); \
+			for ENI in $$ENIS; do \
+				ATTACH_ID=$$(aws ec2 describe-network-interfaces --region $(AWS_REGION) --network-interface-ids "$$ENI" --query "NetworkInterfaces[0].Attachment.AttachmentId" --output text 2>/dev/null); \
+				if [ -n "$$ATTACH_ID" ] && [ "$$ATTACH_ID" != "None" ]; then \
+					aws ec2 detach-network-interface --attachment-id "$$ATTACH_ID" --region $(AWS_REGION) --force 2>/dev/null || true; \
+					sleep 2; \
+				fi; \
+				aws ec2 delete-network-interface --network-interface-id "$$ENI" --region $(AWS_REGION) 2>/dev/null || true; \
+			done; \
+			echo "보안 그룹 삭제 시도: $$SG"; \
+			for i in {1..12}; do \
+				if aws ec2 delete-security-group --region $(AWS_REGION) --group-id "$$SG" 2>/dev/null; then \
+					echo "보안 그룹 삭제 완료: $$SG"; break; \
+				fi; \
+				sleep 5; \
+			done; \
+		done; \
+	fi
 
-	@echo "======================================================"
-	@echo " [4/4] Infra 메인 스택 Terraform Destroy 실행"
-	@echo "=============================================================="
+	@echo "=========================================================="
+	@echo " [5/5] Infra 메인 스택 Terraform Destroy 실행"
+	@echo "=========================================================="
 	$(call run-tf,infra,terraform destroy -auto-approve)
 	
 # ----------------------------------------------------------------
