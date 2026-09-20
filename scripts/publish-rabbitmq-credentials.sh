@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 # 이 스크립트는 기존 AWSCURRENT SecretVersion만 조회·배포합니다.
-# 매 실행마다 AWSCURRENT를 다시 resolve하고, 해당 실행의 두 Namespace에는 같은 VersionId를 사용합니다.
+# 매 실행마다 AWSCURRENT를 다시 resolve하고, 해당 실행의 세 Namespace에는 같은 VersionId를 사용합니다.
 # 최초 SecretVersion 생성과 credential 갱신은 별도 initializer/운영 절차에서 수행해야 합니다.
 
 readonly EXPECTED_AWS_ACCOUNT_ID="596601390909"
@@ -157,7 +157,7 @@ kubernetes_preflight() {
   [[ -z "$kube_exec_role" ]] || \
     die "repository에 정의되지 않은 kubeconfig role override가 있습니다."
 
-  for namespace in messaging backend; do
+  for namespace in messaging backend dev; do
     if ! kubectl --request-timeout="$KUBECTL_REQUEST_TIMEOUT" get namespace "$namespace" -o name >/dev/null; then
       die "Namespace가 없거나 접근할 수 없습니다: $namespace"
     fi
@@ -256,7 +256,7 @@ publish_secret() {
 verify_secret() {
   local namespace="$1"
   local expected_version_id="${2:-}"
-  local summary secret_type source_secret source_version has_username has_password
+  local summary secret_type source_secret source_version has_username has_password data_keys
 
   if ! summary="$(
     kubectl --request-timeout="$KUBECTL_REQUEST_TIMEOUT" \
@@ -270,19 +270,21 @@ verify_secret() {
             (.metadata.annotations[$source_secret_annotation] // ""),
             (.metadata.annotations[$source_version_annotation] // ""),
             ((.data | type == "object") and (.data | has("username")) | tostring),
-            ((.data | type == "object") and (.data | has("password")) | tostring)
+            ((.data | type == "object") and (.data | has("password")) | tostring),
+            (.data // {} | keys | sort | join(","))
           ] | join("|")
         '
   )"; then
     die "Kubernetes Secret 검증 조회에 실패했습니다: ${namespace}/${KUBERNETES_SECRET_NAME}"
   fi
 
-  IFS='|' read -r secret_type source_secret source_version has_username has_password <<<"$summary"
+  IFS='|' read -r secret_type source_secret source_version has_username has_password data_keys <<<"$summary"
   [[ "$secret_type" == "Opaque" ]] || die "Secret type 검증 실패: $namespace"
   [[ "$source_secret" == "$SECRET_NAME" ]] || die "source-secret annotation 검증 실패: $namespace"
   [[ -n "$source_version" ]] || die "source-version-id annotation이 없습니다: $namespace"
   [[ "$has_username" == "true" ]] || die "username key가 없습니다: $namespace"
   [[ "$has_password" == "true" ]] || die "password key가 없습니다: $namespace"
+  [[ "$data_keys" == "password,username" ]] || die "Secret key schema 검증 실패: $namespace"
   [[ -z "$expected_version_id" || "$source_version" == "$expected_version_id" ]] || \
     die "고정한 source VersionId와 publication 결과가 다릅니다: $namespace"
 
@@ -299,11 +301,14 @@ publish() {
   publish_secret backend
   verify_secret backend "$source_version_id"
 
+  publish_secret dev
+  verify_secret dev "$source_version_id"
+
   log "동일한 source VersionId의 RabbitMQ credential publication 완료"
 }
 
 verify() {
-  local messaging_version backend_version
+  local messaging_version backend_version dev_version
 
   verify_secret messaging
   messaging_version="$verified_version_id"
@@ -311,10 +316,13 @@ verify() {
   verify_secret backend
   backend_version="$verified_version_id"
 
-  [[ "$messaging_version" == "$backend_version" ]] || \
-    die "두 Namespace의 source-version-id가 일치하지 않습니다."
+  verify_secret dev
+  dev_version="$verified_version_id"
 
-  log "두 Namespace의 RabbitMQ Secret publication 상태가 일치합니다."
+  [[ "$messaging_version" == "$backend_version" && "$backend_version" == "$dev_version" ]] || \
+    die "세 Namespace의 source-version-id가 일치하지 않습니다."
+
+  log "세 Namespace의 RabbitMQ Secret publication 상태가 일치합니다."
 }
 
 main() {
