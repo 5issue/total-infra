@@ -30,6 +30,11 @@ docker buildx build \
   --push .
 ```
 
+### ECR에서 방금 푸시한 최신 이미지 강제 다운로드
+```bash
+docker pull 596601390909.dkr.ecr.ap-northeast-2.amazonaws.com/kurly-frontend:latest
+```
+
 ### 프론트 테스트
 docker run -d --name kurly-frontend -p 3000:3000 \
  -e API_INTERNAL_URL=http://api.internal \
