@@ -247,7 +247,8 @@ locals {
   db_service_accounts = toset([
     "user_user", "auth_user", "order_user",
     "payment_user", "oms_user",
-    "product_user", "wms_user", "scm_user"
+    "product_user", "wms_user", "scm_user",
+    "ai_user"
   ])
 }
 
@@ -255,7 +256,7 @@ resource "random_password" "db_service_passwords" {
   for_each         = local.db_service_accounts
   length           = 12
   special          = true
-  override_special = "!#$%&*()-_=+[]{}<>:?"
+  override_special = "!$%&*()-_=+<>"
   min_upper        = 1
   min_lower        = 1
   min_numeric      = 1
@@ -325,6 +326,7 @@ locals {
     "shared-pg-wms-service-credentials"     = "wms_user"
     "shared-pg-scm-service-credentials"     = "scm_user"
     "shared-pg-oms-service-credentials"     = "oms_user"
+    "shared-pg-ai-service-credentials"      = "ai_user"
   }
 }
 

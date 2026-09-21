@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+set +x
 umask 077
 
 # 이 스크립트는 기존 AWSCURRENT SecretVersion만 조회·배포합니다.
 # 최초 SecretVersion 생성과 password rotation은 별도 승인된 운영 절차에서 수행해야 합니다.
 
-readonly EXPECTED_AWS_ACCOUNT_ID="596601390909"
-readonly EXPECTED_AWS_REGION="ap-northeast-2"
-readonly EXPECTED_EKS_CLUSTER_NAME="test-eks"
 readonly SECRET_NAME="prod/total/redis-credentials"
 readonly -a KUBERNETES_NAMESPACES=("backend" "dev")
 readonly KUBERNETES_SECRET_NAME="redis-credentials"
@@ -15,14 +13,15 @@ readonly SOURCE_SECRET_ANNOTATION="total.io/source-secret"
 readonly SOURCE_VERSION_ANNOTATION="total.io/source-version-id"
 readonly KUBECTL_REQUEST_TIMEOUT="20s"
 
-readonly AWS_PROFILE="${AWS_PROFILE:-target-infra}"
-readonly AWS_REGION="${AWS_REGION:-$EXPECTED_AWS_REGION}"
-readonly EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-$EXPECTED_EKS_CLUSTER_NAME}"
-
 secret_payload=""
 source_version_id=""
 expected_eks_endpoint=""
 kubectl_context=""
+expected_aws_account_id=""
+aws_region=""
+eks_cluster_name=""
+aws_profile="${AWS_PROFILE:-}"
+declare -a aws_cli=(aws)
 
 cleanup() {
   unset secret_payload
@@ -43,68 +42,36 @@ require_command() {
 }
 
 configure_aws_environment() {
-  # kubeconfig의 aws exec plugin도 지정된 profile만 사용하도록 ambient credential을 제거합니다.
-  unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
-  unset AWS_ROLE_ARN AWS_WEB_IDENTITY_TOKEN_FILE AWS_DEFAULT_PROFILE
-  export AWS_PROFILE AWS_REGION
-  export AWS_DEFAULT_REGION="$AWS_REGION"
+  local credential_count=0
+
+  [[ -n "${AWS_ACCESS_KEY_ID:-}" ]] && ((credential_count += 1))
+  [[ -n "${AWS_SECRET_ACCESS_KEY:-}" ]] && ((credential_count += 1))
+  [[ -n "${AWS_SESSION_TOKEN:-}" ]] && ((credential_count += 1))
+
+  if (( credential_count == 3 )); then
+    # Bootstrap이 전달한 publication Role session을 AWS CLI와 kube exec가 함께 사용합니다.
+    unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_SECURITY_TOKEN
+    unset AWS_ROLE_ARN AWS_WEB_IDENTITY_TOKEN_FILE
+    aws_profile=""
+  elif (( credential_count == 0 )); then
+    [[ -n "$aws_profile" ]] || \
+      die "AWS profile 또는 완전한 임시 session credential이 필요합니다."
+    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
+    unset AWS_ROLE_ARN AWS_WEB_IDENTITY_TOKEN_FILE AWS_DEFAULT_PROFILE
+    export AWS_PROFILE="$aws_profile"
+    aws_cli+=(--profile "$aws_profile")
+  else
+    die "불완전한 AWS session credential environment를 거부합니다."
+  fi
+
+  export AWS_REGION="$aws_region"
+  export AWS_DEFAULT_REGION="$aws_region"
   export AWS_PAGER=""
   export AWS_CLI_AUTO_PROMPT="off"
 }
 
-validate_repository_contract() {
-  [[ "$AWS_REGION" == "$EXPECTED_AWS_REGION" ]] || \
-    die "AWS_REGION이 repository 계약과 다릅니다."
-  [[ "$EKS_CLUSTER_NAME" == "$EXPECTED_EKS_CLUSTER_NAME" ]] || \
-    die "EKS_CLUSTER_NAME이 repository 계약과 다릅니다."
-}
-
-aws_preflight() {
-  local caller_identity caller_account caller_arn
-  local cluster_identity cluster_arn
-
-  log "AWS preflight: profile=$AWS_PROFILE region=$AWS_REGION"
-
-  if ! caller_identity="$(
-    aws sts get-caller-identity \
-      --profile "$AWS_PROFILE" \
-      --region "$AWS_REGION" \
-      --query '[Account,Arn]' \
-      --output text
-  )"; then
-    die "STS caller identity 확인에 실패했습니다."
-  fi
-
-  IFS=$'\t' read -r caller_account caller_arn <<<"$caller_identity"
-  [[ "$caller_account" == "$EXPECTED_AWS_ACCOUNT_ID" ]] || \
-    die "AWS account가 repository 계약과 다릅니다."
-  [[ -n "$caller_arn" && "$caller_arn" != "None" ]] || \
-    die "AWS principal ARN을 확인할 수 없습니다."
-
-  if ! cluster_identity="$(
-    aws eks describe-cluster \
-      --profile "$AWS_PROFILE" \
-      --region "$AWS_REGION" \
-      --name "$EKS_CLUSTER_NAME" \
-      --query 'cluster.[arn,endpoint]' \
-      --output text
-  )"; then
-    die "대상 EKS cluster를 확인할 수 없습니다. EKS를 생성하지 않고 종료합니다."
-  fi
-
-  IFS=$'\t' read -r cluster_arn expected_eks_endpoint <<<"$cluster_identity"
-  [[ "$cluster_arn" == "arn:aws:eks:${EXPECTED_AWS_REGION}:${EXPECTED_AWS_ACCOUNT_ID}:cluster/${EXPECTED_EKS_CLUSTER_NAME}" ]] || \
-    die "EKS cluster ARN이 repository 계약과 다릅니다."
-  [[ -n "$expected_eks_endpoint" && "$expected_eks_endpoint" != "None" ]] || \
-    die "EKS endpoint를 확인할 수 없습니다."
-
-  log "AWS account 및 EKS cluster 확인 완료"
-}
-
-kubernetes_preflight() {
-  local requested_context configured_context current_server kube_exec_command kube_exec_cluster
-  local kube_exec_profile kube_exec_role kube_exec_region
-  local namespace
+resolve_kubectl_context() {
+  local requested_context
 
   requested_context="${KUBECTL_CONTEXT:-}"
   if [[ -n "$requested_context" ]]; then
@@ -113,6 +80,63 @@ kubernetes_preflight() {
     die "kubeconfig context를 확인할 수 없습니다. KUBECTL_CONTEXT를 지정하세요."
   fi
   [[ -n "$kubectl_context" ]] || die "kubeconfig context가 비어 있습니다."
+
+  if [[ ! "$kubectl_context" =~ ^arn:aws[a-zA-Z-]*:eks:([a-z0-9-]+):([0-9]{12}):cluster/([A-Za-z0-9][A-Za-z0-9_-]*)$ ]]; then
+    die "KUBECTL_CONTEXT는 EKS cluster ARN이어야 합니다."
+  fi
+  aws_region="${BASH_REMATCH[1]}"
+  expected_aws_account_id="${BASH_REMATCH[2]}"
+  eks_cluster_name="${BASH_REMATCH[3]}"
+}
+
+aws_preflight() {
+  local caller_identity caller_account caller_arn
+  local cluster_identity cluster_arn
+
+  if [[ -n "$aws_profile" ]]; then
+    log "AWS preflight: profile=$aws_profile region=$aws_region"
+  else
+    log "AWS preflight: publication role session region=$aws_region"
+  fi
+
+  if ! caller_identity="$(
+    "${aws_cli[@]}" sts get-caller-identity \
+      --region "$aws_region" \
+      --query '[Account,Arn]' \
+      --output text
+  )"; then
+    die "STS caller identity 확인에 실패했습니다."
+  fi
+
+  IFS=$'\t' read -r caller_account caller_arn <<<"$caller_identity"
+  [[ "$caller_account" == "$expected_aws_account_id" ]] || \
+    die "AWS caller와 EKS context의 account가 다릅니다."
+  [[ -n "$caller_arn" && "$caller_arn" != "None" ]] || \
+    die "AWS principal ARN을 확인할 수 없습니다."
+
+  if ! cluster_identity="$(
+    "${aws_cli[@]}" eks describe-cluster \
+      --region "$aws_region" \
+      --name "$eks_cluster_name" \
+      --query 'cluster.[arn,endpoint]' \
+      --output text
+  )"; then
+    die "대상 EKS cluster를 확인할 수 없습니다. EKS를 생성하지 않고 종료합니다."
+  fi
+
+  IFS=$'\t' read -r cluster_arn expected_eks_endpoint <<<"$cluster_identity"
+  [[ "$cluster_arn" == "$kubectl_context" ]] || \
+    die "EKS cluster ARN이 요청된 kubeconfig context와 다릅니다."
+  [[ -n "$expected_eks_endpoint" && "$expected_eks_endpoint" != "None" ]] || \
+    die "EKS endpoint를 확인할 수 없습니다."
+
+  log "AWS account 및 EKS cluster 확인 완료"
+}
+
+kubernetes_preflight() {
+  local configured_context current_server kube_exec_command kube_exec_cluster
+  local kube_exec_profile kube_exec_role kube_exec_region
+  local namespace
 
   configured_context="$(kubectl config get-contexts "$kubectl_context" -o name 2>/dev/null || true)"
   [[ "$configured_context" == "$kubectl_context" ]] || \
@@ -133,8 +157,8 @@ kubernetes_preflight() {
       | if $index == null then "" else $args[$index + 1] end
     '
   )"
-  [[ "$kube_exec_cluster" == "$EXPECTED_EKS_CLUSTER_NAME" ]] || \
-    die "kubeconfig exec cluster가 repository 계약과 다릅니다."
+  [[ "$kube_exec_cluster" == "$eks_cluster_name" ]] || \
+    die "kubeconfig exec cluster가 요청된 EKS cluster와 다릅니다."
 
   kube_exec_region="$(
     kubectl --context "$kubectl_context" config view --minify -o json | jq -r '
@@ -143,15 +167,15 @@ kubernetes_preflight() {
       | if $index == null then "" else $args[$index + 1] end
     '
   )"
-  [[ -z "$kube_exec_region" || "$kube_exec_region" == "$EXPECTED_AWS_REGION" ]] || \
-    die "kubeconfig exec region이 repository 계약과 다릅니다."
+  [[ -z "$kube_exec_region" || "$kube_exec_region" == "$aws_region" ]] || \
+    die "kubeconfig exec region이 요청된 EKS region과 다릅니다."
 
   kube_exec_profile="$(
     kubectl --context "$kubectl_context" config view --minify -o json | jq -r '
       [.users[0].user.exec.env[]? | select(.name == "AWS_PROFILE") | .value][0] // ""
     '
   )"
-  [[ -z "$kube_exec_profile" || "$kube_exec_profile" == "$AWS_PROFILE" ]] || \
+  [[ -z "$kube_exec_profile" || "$kube_exec_profile" == "$aws_profile" ]] || \
     die "kubeconfig exec profile이 요청된 AWS profile과 다릅니다."
 
   kube_exec_role="$(
@@ -179,9 +203,8 @@ resolve_secret_version() {
   local secret_metadata deleted_date
 
   if ! secret_metadata="$(
-    aws secretsmanager describe-secret \
-      --profile "$AWS_PROFILE" \
-      --region "$AWS_REGION" \
+    "${aws_cli[@]}" secretsmanager describe-secret \
+      --region "$aws_region" \
       --secret-id "$SECRET_NAME" \
       --output json
   )"; then
@@ -209,9 +232,8 @@ resolve_secret_version() {
 
 load_secret_payload() {
   if ! secret_payload="$(
-    aws secretsmanager get-secret-value \
-      --profile "$AWS_PROFILE" \
-      --region "$AWS_REGION" \
+    "${aws_cli[@]}" secretsmanager get-secret-value \
+      --region "$aws_region" \
       --secret-id "$SECRET_NAME" \
       --version-id "$source_version_id" \
       --query SecretString \
@@ -337,7 +359,7 @@ main() {
   require_command aws
   require_command jq
   require_command kubectl
-  validate_repository_contract
+  resolve_kubectl_context
   configure_aws_environment
   aws_preflight
   kubernetes_preflight

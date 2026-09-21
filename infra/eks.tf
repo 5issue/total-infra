@@ -33,7 +33,7 @@ module "eks" {
   access_entries = {
     # CLI / Terraform 스크립트 실행용 공용 관리자 Role (AssumeRole + MFA)
     target_infra_role = {
-      principal_arn = "arn:aws:iam::596601390909:role/target-infra"
+      principal_arn = data.aws_iam_role.target_infra.arn
       policy_associations = {
         admin = {
           policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
@@ -42,8 +42,15 @@ module "eks" {
       }
       # 쿠버네티스 내부에서 활동할 그룹 지정
       kubernetes_groups = ["db-admin-readers"]
-    } 
-    
+    }
+
+    # Workload publication uses Kubernetes RBAC only. Do not associate an
+    # EKS access policy with this entry.
+    workload_publication = {
+      principal_arn     = aws_iam_role.workload_publication.arn
+      kubernetes_groups = [local.workload_publication_group]
+    }
+
     # 팀원 5명 개인 IAM User (웹 콘솔 직접 조회 및 권한 부여)
     jongwon = {
       principal_arn = "arn:aws:iam::596601390909:user/infra-jongwon"
@@ -127,14 +134,14 @@ module "eks" {
     # coredns    = { most_recent = true }
     # kube-proxy = { most_recent = true }
     vpc-cni = {
-      before_compute                = true
-      most_recent                   = true
-      service_account_role_arn      = module.vpc_cni_irsa.iam_role_arn
-      configuration_values          = jsonencode({
-        enableNetworkPolicy         = "true" # VPC CNI NetworkPolicy 엔진 활성화됨
+      before_compute           = true
+      most_recent              = true
+      service_account_role_arn = module.vpc_cni_irsa.iam_role_arn
+      configuration_values = jsonencode({
+        enableNetworkPolicy = "true" # VPC CNI NetworkPolicy 엔진 활성화됨
         env = {
-          ENABLE_PREFIX_DELEGATION  = "true"
-          WARM_PREFIX_TARGET        = "1"
+          ENABLE_PREFIX_DELEGATION = "true"
+          WARM_PREFIX_TARGET       = "1"
         }
       })
     }
