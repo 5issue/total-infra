@@ -77,3 +77,9 @@ variable "moco_backup_bucket" {
   type        = string
   default     = "kurly-mysql-backup"
 }
+
+variable "enable_audit_logging" {
+  description = "점검용 CloudTrail 및 VPC Flow Logs 활성화 여부 (점검 시에만 true)"
+  type        = bool
+  default     = false
+}
