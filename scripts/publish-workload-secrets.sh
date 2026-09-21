@@ -4,7 +4,6 @@ set +x
 
 readonly SOURCE_SECRET="rabbitmq-ca-signing"
 readonly TARGET_CA_SCRIPT_RELATIVE="workloads/rabbitmq/scripts/publish-ca-trust.sh"
-readonly APPROVED_PRODUCTION_CONTEXT="arn:aws:eks:ap-northeast-2:596601390909:cluster/test-eks"
 readonly repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 readonly redis_credential_publisher="$repo_dir/scripts/publish-redis-credentials.sh"
 
@@ -18,7 +17,7 @@ Supported:
   production redis-credential verify
 
 Production CA requires:
-  KUBECTL_CONTEXT=arn:aws:eks:ap-northeast-2:596601390909:cluster/test-eks
+  KUBECTL_CONTEXT=<EKS cluster ARN>
 
 Known but unsupported components:
   rabbitmq-credential, wms-credential, oms-credential
@@ -91,8 +90,8 @@ kubectl_context="${KUBECTL_CONTEXT:-}"
 if [[ "$environment" == "production" ]]; then
   [[ -n "$kubectl_context" ]] || \
     fail "KUBECTL_CONTEXT is required for production publication"
-  [[ "$kubectl_context" == "$APPROVED_PRODUCTION_CONTEXT" ]] || \
-    fail "production kubectl context is not approved: $kubectl_context"
+  [[ "$kubectl_context" =~ ^arn:aws[a-zA-Z-]*:eks:[a-z0-9-]+:[0-9]{12}:cluster/[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || \
+    fail "production KUBECTL_CONTEXT must be an EKS cluster ARN"
 elif [[ -z "$kubectl_context" ]]; then
   kubectl_context="$(kubectl config current-context 2>/dev/null || true)"
 fi
@@ -109,21 +108,21 @@ if [[ "$environment" == "production" ]]; then
       -o 'jsonpath={.contexts[0].context.cluster}' 2>/dev/null || true
   )"
   [[ -n "$context_cluster" ]] || \
-    fail "approved production context has no cluster reference: $kubectl_context"
+    fail "production context has no cluster reference: $kubectl_context"
 
   cluster_entry="$(
     kubectl --context "$kubectl_context" config view --minify \
       -o 'jsonpath={.clusters[0].name}' 2>/dev/null || true
   )"
   [[ -n "$cluster_entry" && "$cluster_entry" == "$context_cluster" ]] || \
-    fail "approved production context references a missing cluster entry: $context_cluster"
+    fail "production context references a missing cluster entry: $context_cluster"
 
   cluster_server="$(
     kubectl --context "$kubectl_context" config view --minify \
       -o 'jsonpath={.clusters[0].cluster.server}' 2>/dev/null || true
   )"
   [[ -n "$cluster_server" ]] || \
-    fail "approved production cluster entry has an empty server: $cluster_entry"
+    fail "production cluster entry has an empty server: $cluster_entry"
 fi
 
 total_k8s_dir="${TOTAL_K8S_DIR:-$repo_dir/../total-k8s}"

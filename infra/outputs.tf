@@ -8,6 +8,11 @@ output "eks_cluster_endpoint" {
   value       = module.eks.cluster_endpoint
 }
 
+output "workload_publication_role_arn" {
+  description = "IAM role assumed from target-infra for workload material publication"
+  value       = aws_iam_role.workload_publication.arn
+}
+
 output "nat_instance_2a_id" {
   description = "AZ-2a NAT Instance ID"
   value       = aws_instance.nat_instance_2a.id
