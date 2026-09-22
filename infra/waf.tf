@@ -4,11 +4,12 @@
 # AWS WAFv2 Web ACL (ALB 연동용 - REGIONAL)
 # ==============================================================================
 resource "aws_wafv2_web_acl" "alb_waf" {
+  provider = aws.us_east_1
   count = var.enable_waf ? 1 : 0
 
   name        = "${var.project_name}-alb-waf"
   description = "WAF for EKS ALB (Rate Limiting and Common Attacks Defense)"
-  scope       = "REGIONAL"
+  scope       = "CLOUDFRONT"
 
   default_action {
     allow {}
