@@ -356,3 +356,74 @@ resource "kubernetes_secret_v1" "shared_pg_credentials" {
   type = "Opaque"
 }
 
+# AI LLM API Key Secret (OpenRouter)
+resource "kubernetes_secret_v1" "ai_llm_secret" {
+  depends_on = [module.eks]
+
+  metadata {
+    name      = "ai-llm-secret"
+    namespace = "backend"    # AI 네임스페이스 (이름 확인 필요)
+  }
+
+  data = {
+    "LLM_API_KEY" = var.llm_api_key
+  }
+
+  type = "Opaque"
+}
+
+# ==============================================================================
+# OAuth2-Proxy (Swagger UI GitHub OAuth 보호용) 시크릿 배포
+# ==============================================================================
+
+# 1. 쿠키 암호화용 32바이트 무작위 문자열 자동 생성
+resource "random_password" "oauth2_proxy_cookie_secret" {
+  length  = 32
+  special = false
+}
+
+# 2. AWS Secrets Manager에 영구 보관 (기존 KMS CMK 및 7일 대기기간 적용)
+resource "aws_secretsmanager_secret" "oauth2_proxy" {
+  name_prefix             = "prod/total/oauth2-proxy-"
+  description             = "Managed by Terraform - OAuth2-Proxy GitHub Credentials & Cookie Secret"
+  kms_key_id              = data.aws_kms_alias.secrets_cmk.target_key_arn
+  recovery_window_in_days = 7
+
+  tags = {
+    Environment = "prod"
+    ManagedBy   = "terraform"
+    Service     = "oauth2-proxy"
+    Compliance  = "ISMS-P-2.7.2"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "oauth2_proxy_val" {
+  secret_id = aws_secretsmanager_secret.oauth2_proxy.id
+  secret_string = jsonencode({
+    client-id     = var.oauth2_proxy_github_client_id
+    client-secret = var.oauth2_proxy_github_client_secret
+    cookie-secret = base64encode(random_password.oauth2_proxy_cookie_secret.result)
+  })
+}
+
+locals {
+  oauth2_proxy_creds = jsondecode(aws_secretsmanager_secret_version.oauth2_proxy_val.secret_string)
+}
+
+# 3. k8s dev 네임스페이스에 Secret 자동 배포 (Helm 차트에서 existingSecret으로 참조)
+resource "kubernetes_secret_v1" "oauth2_proxy_secrets" {
+  depends_on = [module.eks, kubernetes_namespace_v1.dev]
+
+  metadata {
+    name      = "oauth2-proxy-secrets"
+    namespace = kubernetes_namespace_v1.dev.metadata[0].name
+  }
+
+  data = {
+    "client-id"     = local.oauth2_proxy_creds["client-id"]
+    "client-secret" = local.oauth2_proxy_creds["client-secret"]
+    "cookie-secret" = local.oauth2_proxy_creds["cookie-secret"]
+  }
+
+  type = "Opaque"
+}
