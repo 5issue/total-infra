@@ -185,20 +185,42 @@ destroy:
 	@echo " [1/5] K8s 리소스 선제 정리 및 Finalizer 해제"
 	@echo "=========================================================="
 	@export KUBECONFIG=~/.kube/config 2>/dev/null || true; \
+	\
+	echo "1. Ingress 및 로드밸런서 연동 리소스 선제 정리..."; \
 	kubectl delete ingress --all -A --timeout=30s 2>/dev/null || true; \
 	kubectl delete targetgroupbindings --all -A --timeout=30s 2>/dev/null || true; \
 	kubectl delete nodepools --all --timeout=30s 2>/dev/null || true; \
 	kubectl delete nodeclaims --all --timeout=30s 2>/dev/null || true; \
 	\
-	echo "CRD 리소스 finalizer 강제 제거..."; \
-	for TYPE in applications.argoproj.io rollouts.argoproj.io certificates.cert-manager.io ingress targetgroupbindings.elbv2.k8s.aws; do \
+	echo "2. ArgoCD ApplicationSet & Application 재생성 차단 및 삭제..."; \
+	kubectl delete applicationsets.argoproj.io --all -A --timeout=20s 2>/dev/null || true; \
+	kubectl get applicationsets.argoproj.io -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null | \
+	while read -r NS NAME; do \
+		[ -n "$$NAME" ] && kubectl patch applicationset.argoproj.io "$$NAME" -n "$$NS" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
+	done; \
+	kubectl delete applications.argoproj.io --all -A --timeout=20s 2>/dev/null || true; \
+	kubectl get applications.argoproj.io -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null | \
+	while read -r NS NAME; do \
+		[ -n "$$NAME" ] && kubectl patch application.argoproj.io "$$NAME" -n "$$NS" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
+	done; \
+	\
+	echo "3. 워크로드 및 영구 볼륨(PVC) Finalizer 해제 (EBS 볼륨 락 방지)..."; \
+	kubectl delete statefulset --all -A --timeout=20s 2>/dev/null || true; \
+	kubectl delete pvc --all -A --timeout=20s 2>/dev/null || true; \
+	kubectl get pvc -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null | \
+	while read -r NS NAME; do \
+		[ -n "$$NAME" ] && kubectl patch pvc "$$NAME" -n "$$NS" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
+	done; \
+	\
+	echo "4. 기타 CRD 리소스 finalizer 강제 제거..."; \
+	for TYPE in rollouts.argoproj.io certificates.cert-manager.io clusterissuers.cert-manager.io issuers.cert-manager.io; do \
 		kubectl get $$TYPE -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null | \
-		while read NS NAME; do \
-			[ -z "$$NAME" ] || kubectl patch $$TYPE "$$NAME" -n "$$NS" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
+		while read -r NS NAME; do \
+			[ -n "$$NAME" ] && kubectl patch $$TYPE "$$NAME" -n "$$NS" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
 		done; \
 	done; \
 	\
-	echo "커스텀 네임스페이스 finalizer 선제 해제..."; \
+	echo "5. 커스텀 네임스페이스 finalizer 선제 해제..."; \
 	for NS in $$(kubectl get ns --no-headers 2>/dev/null | awk '{print $$1}' | grep -E "^(frontend|backend|dev|argocd|prometheus|argo-rollouts|cert-manager)$$"); do \
 		echo "네임스페이스 finalizer 해제: $$NS"; \
 		kubectl get ns "$$NS" -o json 2>/dev/null | jq '.spec.finalizers = []' | kubectl replace --raw "/api/v1/namespaces/$$NS/finalize" -f - 2>/dev/null || true; \

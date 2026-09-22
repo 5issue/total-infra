@@ -81,7 +81,7 @@ variable "moco_backup_bucket" {
 variable "enable_audit_logging" {
   description = "점검용 CloudTrail 및 VPC Flow Logs 활성화 여부 (점검 시에만 true)"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "llm_api_key" {
