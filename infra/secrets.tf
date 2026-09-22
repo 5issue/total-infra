@@ -356,7 +356,6 @@ resource "kubernetes_secret_v1" "shared_pg_credentials" {
   type = "Opaque"
 }
 
-
 # AI LLM API Key Secret (OpenRouter)
 resource "kubernetes_secret_v1" "ai_llm_secret" {
   depends_on = [module.eks]
