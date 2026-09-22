@@ -289,6 +289,8 @@ destroy:
 	@echo " [3/5] AWS ALB 및 Target Group 선제 소멸"
 	@echo "=========================================================="
 	@for alb in $$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-load-balancers --region $(AWS_REGION) --query "LoadBalancers[?contains(LoadBalancerName, 'mainalbgroup') || contains(LoadBalancerName, 'k8s')].LoadBalancerArn" --output text 2>/dev/null); do \
+		echo "ALB 삭제 보호 강제 해제: $$alb"; \
+		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 modify-load-balancer-attributes --load-balancer-arn "$$alb" --attributes Key=deletion_protection.enabled,Value=false --region $(AWS_REGION) 2>/dev/null || true; \
 		echo "ALB 삭제: $$alb"; \
 		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 delete-load-balancer --load-balancer-arn "$$alb" --region $(AWS_REGION) 2>/dev/null || true; \
 		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 wait load-balancers-deleted --load-balancer-arns "$$alb" --region $(AWS_REGION); \
