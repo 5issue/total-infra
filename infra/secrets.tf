@@ -356,3 +356,19 @@ resource "kubernetes_secret_v1" "shared_pg_credentials" {
   type = "Opaque"
 }
 
+
+# AI LLM API Key Secret (OpenRouter)
+resource "kubernetes_secret_v1" "ai_llm_secret" {
+  depends_on = [module.eks]
+
+  metadata {
+    name      = "ai-llm-secret"
+    namespace = "ai"    # AI 네임스페이스 (이름 확인 필요)
+  }
+
+  data = {
+    "LLM_API_KEY" = var.llm_api_key
+  }
+
+  type = "Opaque"
+}
