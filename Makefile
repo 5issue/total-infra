@@ -26,7 +26,17 @@ define run-tf
 	$(2)
 endef
 
-.PHONY: iam-setup iam-plan iam iam-destroy base-plan base base-destroy init plan apply workload-publication workload-publication-bootstrap rabbitmq-credential-publish rabbitmq-credential-verify rabbitmq-wms-credential-publish rabbitmq-wms-credential-verify rabbitmq-oms-credential-publish rabbitmq-oms-credential-verify redis-credential-publish redis-credential-verify destroy scheduler-plan scheduler scheduler-destroy
+.PHONY: \
+	iam-setup iam-plan iam iam-destroy \
+	base-plan base base-destroy \
+	init plan apply destroy \
+	workload-publication workload-publication-bootstrap \
+	rabbitmq-credential-publish rabbitmq-credential-verify \
+	rabbitmq-wms-credential-publish rabbitmq-wms-credential-verify \
+	rabbitmq-oms-credential-publish rabbitmq-oms-credential-verify \
+	redis-credential-publish redis-credential-verify \
+	publish-all-credentials \
+	scheduler-plan scheduler scheduler-destroy
 
 # ----------------------------------------------------------------
 # 1. IAM 등록 (최초 1회 실행)
@@ -195,7 +205,7 @@ redis-credential-verify:
 
 publish-all-credentials:
 	@echo "==> [1/4] Bootstrapping workload publication environment..."
-	@$(MAKE) workload-publication-bootstrap ENV=$(ENV) KUBECTL_CONTEXT=$(KUBECTL_CONTEXT)
+	@$(MAKE) workload-publication-bootstrap ENV="$(or $(ENV),production)" KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" TOTAL_K8S_DIR="$(TOTAL_K8S_DIR)"
 
 	@echo "==> [2/4] Publishing and verifying RabbitMQ credentials..."
 	@$(MAKE) rabbitmq-credential-publish
