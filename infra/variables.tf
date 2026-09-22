@@ -77,3 +77,9 @@ variable "moco_backup_bucket" {
   type        = string
   default     = "kurly-mysql-backup"
 }
+
+variable "llm_api_key" {
+  description = "OpenRouter LLM API Key for AI serving"
+  type        = string
+  sensitive   = true
+}

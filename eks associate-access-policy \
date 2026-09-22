@@ -1,0 +1,13 @@
+{
+    "accessEntry": {
+        "clusterName": "test-eks",
+        "principalArn": "arn:aws:iam::596601390909:user/infra-youngheon",
+        "kubernetesGroups": [],
+        "accessEntryArn": "arn:aws:eks:ap-northeast-2:596601390909:access-entry/test-eks/user/596601390909/infra-youngheon/30d04293-8d28-5a16-b997-640d7ffbb896",
+        "createdAt": "2026-09-09T16:52:07.616000+09:00",
+        "modifiedAt": "2026-09-09T16:52:07.616000+09:00",
+        "tags": {},
+        "username": "arn:aws:iam::596601390909:user/infra-youngheon",
+        "type": "STANDARD"
+    }
+}

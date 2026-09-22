@@ -1,0 +1,14 @@
+------------------------
+| DescribeRepositories |
++----------------------+
+|  [1m[34mkurly-frontend[0m      |
+|  [1m[34mkurly-oms[0m           |
+|  [1m[34mkurly-auth[0m          |
+|  [1m[34mkurly-product[0m       |
+|  [1m[34mkurly-user[0m          |
+|  [1m[34mkurly-payment[0m       |
+|  [1m[34mkurly-scm[0m           |
+|  [1m[34mkurly-order[0m         |
+|  [1m[34mkurly-ai-assistant[0m  |
+|  [1m[34mkurly-wms[0m           |
++----------------------+
