@@ -363,7 +363,7 @@ resource "kubernetes_secret_v1" "ai_llm_secret" {
 
   metadata {
     name      = "ai-llm-secret"
-    namespace = "ai"    # AI 네임스페이스 (이름 확인 필요)
+    namespace = "backend"    # AI 네임스페이스 (이름 확인 필요)
   }
 
   data = {
