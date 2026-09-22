@@ -26,7 +26,7 @@ define run-tf
 	$(2)
 endef
 
-.PHONY: iam-setup iam-plan iam iam-destroy base-plan base base-destroy init plan apply workload-publication workload-publication-bootstrap rabbitmq-credential-publish rabbitmq-credential-verify redis-credential-publish redis-credential-verify destroy scheduler-plan scheduler scheduler-destroy
+.PHONY: iam-setup iam-plan iam iam-destroy base-plan base base-destroy init plan apply workload-publication workload-publication-bootstrap rabbitmq-credential-publish rabbitmq-credential-verify rabbitmq-wms-credential-publish rabbitmq-wms-credential-verify rabbitmq-oms-credential-publish rabbitmq-oms-credential-verify redis-credential-publish redis-credential-verify destroy scheduler-plan scheduler scheduler-destroy
 
 # ----------------------------------------------------------------
 # 1. IAM 등록 (최초 1회 실행)
@@ -168,6 +168,22 @@ rabbitmq-credential-publish:
 rabbitmq-credential-verify:
 	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
 		./scripts/publish-rabbitmq-credentials.sh verify
+
+rabbitmq-wms-credential-publish:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+		./scripts/publish-rabbitmq-credentials.sh publish wms
+
+rabbitmq-wms-credential-verify:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+		./scripts/publish-rabbitmq-credentials.sh verify wms
+
+rabbitmq-oms-credential-publish:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+		./scripts/publish-rabbitmq-credentials.sh publish oms
+
+rabbitmq-oms-credential-verify:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+		./scripts/publish-rabbitmq-credentials.sh verify oms
 
 redis-credential-publish:
 	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \

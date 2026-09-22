@@ -9,17 +9,18 @@ umask 077
 readonly EXPECTED_AWS_ACCOUNT_ID="596601390909"
 readonly EXPECTED_AWS_REGION="ap-northeast-2"
 readonly EXPECTED_EKS_CLUSTER_NAME="test-eks"
-readonly SECRET_NAME="prod/total/rabbitmq-app-credentials"
-readonly KUBERNETES_SECRET_NAME="rabbitmq-app-credentials"
-readonly EXPECTED_USERNAME="total-backend"
 readonly SOURCE_SECRET_ANNOTATION="total.io/source-secret"
 readonly SOURCE_VERSION_ANNOTATION="total.io/source-version-id"
 readonly KUBECTL_REQUEST_TIMEOUT="20s"
 
+readonly IDENTITY="${2:-backend}"
 readonly AWS_PROFILE="${AWS_PROFILE:-target-infra}"
 readonly AWS_REGION="${AWS_REGION:-$EXPECTED_AWS_REGION}"
 readonly EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-$EXPECTED_EKS_CLUSTER_NAME}"
 
+SECRET_NAME=""
+KUBERNETES_SECRET_NAME=""
+EXPECTED_USERNAME=""
 secret_payload=""
 source_version_id=""
 expected_eks_endpoint=""
@@ -31,11 +32,11 @@ cleanup() {
 trap cleanup EXIT
 
 log() {
-  printf '[rabbitmq-credential] %s\n' "$*"
+  printf '[rabbitmq-credential:%s] %s\n' "$IDENTITY" "$*"
 }
 
 die() {
-  printf '[rabbitmq-credential] ERROR: %s\n' "$*" >&2
+  printf '[rabbitmq-credential:%s] ERROR: %s\n' "$IDENTITY" "$*" >&2
   exit 1
 }
 
@@ -51,6 +52,31 @@ configure_aws_environment() {
   export AWS_DEFAULT_REGION="$AWS_REGION"
   export AWS_PAGER=""
   export AWS_CLI_AUTO_PROMPT="off"
+}
+
+configure_identity() {
+  case "$IDENTITY" in
+    backend)
+      SECRET_NAME="prod/total/rabbitmq-app-credentials"
+      KUBERNETES_SECRET_NAME="rabbitmq-app-credentials"
+      EXPECTED_USERNAME="total-backend"
+      ;;
+    wms)
+      SECRET_NAME="prod/total/rabbitmq-wms-credentials"
+      KUBERNETES_SECRET_NAME="rabbitmq-wms-credentials"
+      EXPECTED_USERNAME="total-wms"
+      ;;
+    oms)
+      SECRET_NAME="prod/total/rabbitmq-oms-credentials"
+      KUBERNETES_SECRET_NAME="rabbitmq-oms-credentials"
+      EXPECTED_USERNAME="total-oms"
+      ;;
+    *)
+      die "지원하지 않는 RabbitMQ identity입니다. 허용값: backend, wms, oms"
+      ;;
+  esac
+
+  readonly SECRET_NAME KUBERNETES_SECRET_NAME EXPECTED_USERNAME
 }
 
 validate_repository_contract() {
@@ -328,10 +354,11 @@ verify() {
 main() {
   local mode="${1:-}"
 
-  [[ "$#" -eq 1 ]] || die "사용법: $0 <publish|verify>"
+  (( $# == 1 || $# == 2 )) || die "사용법: $0 <publish|verify> [backend|wms|oms]"
   [[ "$mode" == "publish" || "$mode" == "verify" ]] || \
-    die "사용법: $0 <publish|verify>"
+    die "사용법: $0 <publish|verify> [backend|wms|oms]"
 
+  configure_identity
   require_command aws
   require_command jq
   require_command kubectl
