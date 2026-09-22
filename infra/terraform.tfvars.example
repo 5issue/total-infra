@@ -14,3 +14,8 @@ argocd_admin_password_hash   = "argocd_관리자_패스워드"
 
 grafana_github_client_secret = "YOUR_GITHUB_CLIENT_SECRET"
 grafana_admin_password       = "grafana_관리자_패스워드"
+
+llm_api_key                  = "llm_api_key"
+
+oauth2_proxy_github_client_id     = "Ov23liP6eNFK5te5Nrt3"
+oauth2_proxy_github_client_secret = "dece3c313ae87df9e84ee63d25fbb5ca1d394a91"

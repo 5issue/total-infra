@@ -21,3 +21,48 @@ module "vpc_cni_irsa" {
     ManagedBy   = "terraform"
   }
 }
+
+# ==============================================================================
+# [서비스별 IRSA] Backend & AI Services 전용 IAM Roles
+# ==============================================================================
+
+locals {
+  # 서비스 목록 및 네임스페이스 매핑
+  app_services = {
+    # Backend Services
+    auth    = { namespace = "backend", sa_name = "auth-sa" }
+    order   = { namespace = "backend", sa_name = "order-sa" }
+    payment = { namespace = "backend", sa_name = "payment-sa" }
+    product = { namespace = "backend", sa_name = "product-sa" }
+    user    = { namespace = "backend", sa_name = "user-sa" }
+    oms     = { namespace = "backend", sa_name = "oms-sa" }
+    scm     = { namespace = "backend", sa_name = "scm-sa" }
+    wms     = { namespace = "backend", sa_name = "wms-sa" }
+
+    # AI Service
+    ai      = { namespace = "backend", sa_name = "ai-sa" }
+  }
+}
+
+# 1. 공통 IRSA IAM Roles 일괄 생성
+module "workload_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "~> 5.0"
+
+  for_each = local.app_services
+
+  role_name = "${each.key}-service-irsa"
+
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["${each.value.namespace}:${each.value.sa_name}"]
+    }
+  }
+
+  tags = {
+    Service     = each.key
+    Environment = "prod"
+    ManagedBy   = "terraform"
+  }
+}

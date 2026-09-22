@@ -89,3 +89,14 @@ variable "llm_api_key" {
   type        = string
   sensitive   = true
 }
+
+variable "oauth2_proxy_github_client_id" {
+  description = "GitHub OAuth App Client ID for Swagger UI protection"
+  type        = string
+}
+
+variable "oauth2_proxy_github_client_secret" {
+  description = "GitHub OAuth App Client Secret for Swagger UI protection"
+  type        = string
+  sensitive   = true
+}
