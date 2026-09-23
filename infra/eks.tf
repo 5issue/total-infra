@@ -40,70 +40,17 @@ module "eks" {
           access_scope = { type = "cluster" }
         }
       }
-      # 쿠버네티스 내부에서 활동할 그룹 지정
-      kubernetes_groups = ["db-admin-readers"]
     }
 
-    # Workload publication uses Kubernetes RBAC only. Do not associate an
-    # EKS access policy with this entry.
+    # Workload Publication 전용 Role 
     workload_publication = {
       principal_arn     = aws_iam_role.workload_publication.arn
       kubernetes_groups = [local.workload_publication_group]
     }
 
-    # 팀원 5명 개인 IAM User (웹 콘솔 직접 조회 및 권한 부여)
-    jongwon = {
-      principal_arn = "arn:aws:iam::596601390909:user/infra-jongwon"
-      policy_associations = {
-        admin = {
-          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = { type = "cluster" }
-        }
-      }
-      kubernetes_groups = ["db-admin-readers"]
-    }
-
-    youngheon = {
-      principal_arn = "arn:aws:iam::596601390909:user/infra-youngheon"
-      policy_associations = {
-        admin = {
-          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = { type = "cluster" }
-        }
-      }
-      kubernetes_groups = ["db-admin-readers"]
-    }
-
-    mingyu = {
-      principal_arn = "arn:aws:iam::596601390909:user/infra-mingyu"
-      policy_associations = {
-        admin = {
-          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = { type = "cluster" }
-        }
-      }
-      kubernetes_groups = ["db-admin-readers"]
-    }
-
-    jaehyeok = {
-      principal_arn = "arn:aws:iam::596601390909:user/infra-jaehyeok"
-      policy_associations = {
-        admin = {
-          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = { type = "cluster" }
-        }
-      }
-      kubernetes_groups = ["db-admin-readers"]
-    }
-
-    jiyoon = {
-      principal_arn = "arn:aws:iam::596601390909:user/infra-jiyoon"
-      policy_associations = {
-        admin = {
-          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = { type = "cluster" }
-        }
-      }
+   # 팀원 5인 작업용 Role (MFA 필수, Admin 정책 없음, RBAC 그룹 매핑)
+    eks_cluster_access = {
+      principal_arn     = aws_iam_role.eks_cluster_access.arn
       kubernetes_groups = ["db-admin-readers"]
     }
 
@@ -113,7 +60,6 @@ module "eks" {
     be_user1 = {
       principal_arn     = "arn:aws:iam::596601390909:user/be-user1"
       kubernetes_groups = ["backend-developers"]
-      # 주의: policy_associations(AmazonEKSClusterAdminPolicy)를 넣지 않습니다!
     }
 
     be_user2 = {
