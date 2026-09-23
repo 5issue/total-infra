@@ -37,8 +37,17 @@ resource "helm_release" "metrics_server" {
       }
 
       metrics = {
-        enabled = true
+        enabled = false
       }
+
+      defaultArgs = [
+        "--cert-dir=/tmp",
+        "--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname",
+        "--kubelet-use-node-status-port",
+        "--metric-resolution=15s",
+        "--kubelet-insecure-tls",
+        "--authorization-always-allow-paths=/livez,/readyz,/metrics"
+      ]
 
       serviceMonitor = {
         enabled       = true
