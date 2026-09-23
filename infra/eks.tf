@@ -31,7 +31,6 @@ module "eks" {
 
   # EKS 클러스터 관리자 권한 발급
   access_entries = {
-    # CLI / Terraform 스크립트 실행용 공용 관리자 Role (AssumeRole + MFA)
     target_infra_role = {
       principal_arn = data.aws_iam_role.target_infra.arn
       policy_associations = {
@@ -42,21 +41,32 @@ module "eks" {
       }
     }
 
-    # Workload Publication 전용 Role 
     workload_publication = {
       principal_arn     = aws_iam_role.workload_publication.arn
       kubernetes_groups = [local.workload_publication_group]
     }
 
-   # 팀원 5인 작업용 Role (MFA 필수, Admin 정책 없음, RBAC 그룹 매핑)
     eks_cluster_access = {
-      principal_arn     = aws_iam_role.eks_cluster_access.arn
+      principal_arn = aws_iam_role.eks_cluster_access.arn
+      policy_associations = {
+        view = {
+          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+
+
+    db_admin_secret_reader = {
+      principal_arn     = aws_iam_role.db_admin_secret_reader.arn
       kubernetes_groups = ["db-admin-readers"]
     }
 
-    # =========================================================================
-    # 백엔드 개발팀 전용 Access Entry (ClusterAdmin 권한 제외, K8s RBAC 연동용)
-    # =========================================================================
+    rabbitmq_redis_secret_reader = {
+      principal_arn     = aws_iam_role.rabbitmq_redis_secret_reader.arn
+      kubernetes_groups = ["rabbitmq-redis-readers"]
+    }
+
     be_user1 = {
       principal_arn     = "arn:aws:iam::596601390909:user/be-user1"
       kubernetes_groups = ["backend-developers"]
@@ -74,10 +84,6 @@ module "eks" {
   }
 
 
-  # =========================================================================
-  # [보안 요구사항] EKS Secrets KMS 암호화 활성화 및 권한 위임 명시
-  # KMS 키 관리자 및 사용자에 현재 실행 주체(Caller ARN) 직접 등록
-  # =========================================================================
   create_kms_key                = true
   kms_key_enable_default_policy = true
 
