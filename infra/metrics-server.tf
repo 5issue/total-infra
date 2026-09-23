@@ -37,7 +37,7 @@ resource "helm_release" "metrics_server" {
       }
 
       metrics = {
-        enabled = false
+        enabled = true
       }
 
       defaultArgs = [
@@ -45,7 +45,10 @@ resource "helm_release" "metrics_server" {
         "--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname",
         "--kubelet-use-node-status-port",
         "--metric-resolution=15s",
-        "--kubelet-insecure-tls",
+        "--kubelet-insecure-tls"
+      ]
+
+      args = [
         "--authorization-always-allow-paths=/livez,/readyz,/metrics"
       ]
 
