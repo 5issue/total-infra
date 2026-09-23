@@ -56,7 +56,6 @@ module "eks" {
       }
     }
 
-
     db_admin_secret_reader = {
       principal_arn     = aws_iam_role.db_admin_secret_reader.arn
       kubernetes_groups = ["db-admin-readers"]
@@ -83,6 +82,10 @@ module "eks" {
     }
   }
 
+  # =========================================================================
+  # [보안 요구사항] EKS Secrets KMS 암호화 활성화 및 권한 위임 명시
+  # KMS 키 관리자 및 사용자에 현재 실행 주체(Caller ARN) 직접 등록
+  # =========================================================================
 
   create_kms_key                = true
   kms_key_enable_default_policy = true
