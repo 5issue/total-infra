@@ -106,6 +106,25 @@ module "eks" {
       }
       kubernetes_groups = ["db-admin-readers"]
     }
+
+    # =========================================================================
+    # 백엔드 개발팀 전용 Access Entry (ClusterAdmin 권한 제외, K8s RBAC 연동용)
+    # =========================================================================
+    be_user1 = {
+      principal_arn     = "arn:aws:iam::596601390909:user/be-user1"
+      kubernetes_groups = ["backend-developers"]
+      # 주의: policy_associations(AmazonEKSClusterAdminPolicy)를 넣지 않습니다!
+    }
+
+    be_user2 = {
+      principal_arn     = "arn:aws:iam::596601390909:user/be-user2"
+      kubernetes_groups = ["backend-developers"]
+    }
+
+    be_user3 = {
+      principal_arn     = "arn:aws:iam::596601390909:user/be-user3"
+      kubernetes_groups = ["backend-developers"]
+    }
   }
 
 
