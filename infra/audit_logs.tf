@@ -128,3 +128,22 @@ resource "aws_flow_log" "vpc_flow_log" {
     Name = "vpc-flow-log-audit"
   }
 }
+
+resource "aws_ssm_document" "session_manager_run_shell" {
+  name          = "SSM-SessionManagerRunShell"
+  document_type = "Session"
+  document_format = "JSON"
+
+  content = jsonencode({
+    schemaVersion = "1.0"
+    description   = "Session Manager Logging Configuration"
+    sessionType   = "Standard_Stream"
+    inputs = {
+      s3BucketName                = "kurly-security-logs-ap-northeast-2"
+      s3KeyPrefix                 = "session-logs"
+      s3EncryptionEnabled         = true
+      cloudWatchLogGroupName      = ""
+      cloudWatchEncryptionEnabled = false
+    }
+  })
+}

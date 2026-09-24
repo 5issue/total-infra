@@ -66,3 +66,27 @@ module "workload_irsa" {
     ManagedBy   = "terraform"
   }
 }
+
+# ==============================================================================
+# auth-service-irsa 전용 KMS 서명 및 공개키 조회 정책 연결
+# ==============================================================================
+resource "aws_iam_role_policy" "auth_kms_jwt_policy" {
+  name = "AuthKmsJwtSignPolicy"
+  role = module.workload_irsa["auth"].iam_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:GetPublicKey",
+          "kms:Sign",
+          "kms:DescribeKey",
+          "kms:Verify"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}

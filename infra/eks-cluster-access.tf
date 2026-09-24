@@ -1,6 +1,6 @@
 resource "aws_iam_role" "eks_cluster_access" {
   name                 = "eks-cluster-access"
-  description          = "Role for team operators to access EKS with MFA condition (basic ops only)"
+  description          = "Role for team operators to access EKS with MFA condition basic ops only"
   max_session_duration = 43200
 
   assume_role_policy = jsonencode({
@@ -31,7 +31,7 @@ resource "aws_iam_role" "eks_cluster_access" {
 
 resource "aws_iam_policy" "eks_describe_cluster" {
   name        = "EKSDescribeClusterPolicy"
-  description = "kubeconfig 갱신/클러스터 메타데이터 조회용 공용 정책 (팀원 3개 Role 공용)"
+  description = "Common policy to describe EKS cluster metadata for kubeconfig updates"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -55,7 +55,7 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_access_describe" {
 
 resource "aws_iam_role" "db_admin_secret_reader" {
   name                 = "db-admin-secret-reader"
-  description          = "jaehyeok, jongwon 전용 - DB 관리자 계정 Secret 조회 (MFA 필수)"
+  description          = "Dedicated role for jaehyeok and jongwon to read DB admin secrets with MFA"
   max_session_duration = 43200 # 12시간
 
   assume_role_policy = jsonencode({
@@ -88,7 +88,7 @@ resource "aws_iam_role_policy_attachment" "db_admin_secret_reader_describe" {
 
 resource "aws_iam_role" "rabbitmq_redis_secret_reader" {
   name                 = "rabbitmq-redis-secret-reader"
-  description          = "jiyoon, jongwon 전용 - RabbitMQ/Redis Secret 조회 (MFA 필수)"
+  description          = "Dedicated role for jiyoon and jongwon to read RabbitMQ and Redis secrets with MFA"
   max_session_duration = 43200 # 12시간
 
   assume_role_policy = jsonencode({

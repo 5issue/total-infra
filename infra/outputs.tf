@@ -43,3 +43,13 @@ output "waf_web_acl_arn" {
   description = "생성된 WAF Web ACL ARN (Ingress 어노테이션에 사용)"
   value       = var.enable_waf ? aws_wafv2_web_acl.alb_waf[0].arn : null
 }
+
+output "auth_jwt_kms_key_id" {
+  value       = aws_kms_alias.auth_jwt_signing.name
+  description = "auth-service의 JWT_KMS_KEY_ID 환경변수에 넣을 값"
+}
+
+output "auth_kms_irsa_role_arn" {
+  value       = module.auth_kms_irsa.iam_role_arn
+  description = "auth-service-sa ServiceAccount의 eks.amazonaws.com/role-arn 어노테이션에 넣을 값"
+}

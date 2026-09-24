@@ -32,8 +32,22 @@ resource "aws_route53_record" "www" {
   }
 }
 
+# api.cloudyim.store -> ALB 직접 연결 (운영 백엔드 & AI API)
+resource "aws_route53_record" "api" {
+  count   = var.alb_dns_name != "" ? 1 : 0
+  zone_id = data.aws_route53_zone.main.zone_id
+  name    = "api.${var.domain_name}"
+  type    = "A"
+
+  alias {
+    name                   = var.alb_dns_name
+    zone_id                = "ZWKZPGTI48KDX" # 서울(ap-northeast-2) 리전 ALB 고정 Hosted Zone ID
+    evaluate_target_health = true
+  }
+}
+
 # ==============================================================================
-# 관리자 도구 서브도메인 -> ALB 연결
+# 관리자 도구 서브도메인 -> ALB 연결 (A 레코드 Alias로 통일)
 # Ingress 생성 후 ALB DNS가 나왔을 때(var.alb_dns_name이 채워졌을 때)만 생성
 # ==============================================================================
 
@@ -42,9 +56,13 @@ resource "aws_route53_record" "argocd" {
   count   = var.alb_dns_name != "" ? 1 : 0
   zone_id = data.aws_route53_zone.main.zone_id
   name    = "argocd.${var.domain_name}"
-  type    = "CNAME"
-  ttl     = 300
-  records = [var.alb_dns_name]
+  type    = "A"
+
+  alias {
+    name                   = var.alb_dns_name
+    zone_id                = "ZWKZPGTI48KDX" # 서울(ap-northeast-2) 리전 ALB 고정 Hosted Zone ID
+    evaluate_target_health = true
+  }
 }
 
 # grafana.cloudyim.store -> ALB
@@ -52,9 +70,13 @@ resource "aws_route53_record" "grafana" {
   count   = var.alb_dns_name != "" ? 1 : 0
   zone_id = data.aws_route53_zone.main.zone_id
   name    = "grafana.${var.domain_name}"
-  type    = "CNAME"
-  ttl     = 300
-  records = [var.alb_dns_name]
+  type    = "A"
+
+  alias {
+    name                   = var.alb_dns_name
+    zone_id                = "ZWKZPGTI48KDX"
+    evaluate_target_health = true
+  }
 }
 
 # dev.cloudyim.store -> ALB 직접 연결 (DAST 점검용)
@@ -62,7 +84,11 @@ resource "aws_route53_record" "dev" {
   count   = var.alb_dns_name != "" ? 1 : 0
   zone_id = data.aws_route53_zone.main.zone_id
   name    = "dev.${var.domain_name}"
-  type    = "CNAME"
-  ttl     = 300
-  records = [var.alb_dns_name]
+  type    = "A"
+
+  alias {
+    name                   = var.alb_dns_name
+    zone_id                = "ZWKZPGTI48KDX"
+    evaluate_target_health = true
+  }
 }

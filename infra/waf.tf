@@ -8,7 +8,7 @@ resource "aws_wafv2_web_acl" "alb_waf" {
   count = var.enable_waf ? 1 : 0
 
   name        = "${var.project_name}-alb-waf"
-  description = "WAF for EKS ALB (Rate Limiting and Common Attacks Defense)"
+  description = "WAF for EKS ALB - Rate Limiting and Common Attacks Defense"
   scope       = "CLOUDFRONT"
 
   default_action {

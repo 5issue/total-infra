@@ -15,9 +15,11 @@ resource "aws_iam_policy" "node_ansible_s3" {
         Effect = "Allow"
         Action = [
           "s3:GetBucketLocation",
+          "s3:GetEncryptionConfiguration", # SSM Session Manager 암호화 검증 권한
           "s3:GetObject",
           "s3:GetObjectVersion",
           "s3:PutObject",
+          "s3:PutObjectAcl",              # SSM 로그 업로드 시 ACL 적용 권한
           "s3:DeleteObject"
         ]
         Resource = [

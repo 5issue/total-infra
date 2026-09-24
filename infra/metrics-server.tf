@@ -11,13 +11,25 @@ resource "helm_release" "metrics_server" {
   namespace  = "kube-system"
 
   wait            = true
-  timeout         = 600
+  timeout         = 300
   atomic          = true
   cleanup_on_fail = true
 
   values = [
     yamlencode({
       replicas = 1
+
+      # -----------------------------------------------------------------------
+      # [EKS 필수] Kubelet 자체 서명 인증서 검증 건너뛰기
+      # -----------------------------------------------------------------------
+      defaultArgs = [
+        "--cert-dir=/tmp",
+        "--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname",
+        "--kubelet-use-node-status-port",
+        "--metric-resolution=15s",
+        "--kubelet-insecure-tls",
+        "--authorization-always-allow-paths=/livez,/readyz,/metrics"
+      ]
 
       # HPA가 사용하는 클러스터 핵심 구성요소이므로
       # Karpenter Spot 노드가 아닌 Managed Node Group에 배치합니다.

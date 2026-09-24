@@ -358,11 +358,17 @@ resource "kubernetes_secret_v1" "shared_pg_credentials" {
 
 # AI LLM API Key Secret (OpenRouter)
 resource "kubernetes_secret_v1" "ai_llm_secret" {
-  depends_on = [module.eks]
+  for_each = toset(local.target_namespaces)
+
+  depends_on = [
+    module.eks,
+    kubernetes_namespace_v1.backend,
+    kubernetes_namespace_v1.dev
+  ]
 
   metadata {
     name      = "ai-llm-secret"
-    namespace = "backend"    # AI 네임스페이스 (이름 확인 필요)
+    namespace = each.key
   }
 
   data = {
@@ -423,6 +429,100 @@ resource "kubernetes_secret_v1" "oauth2_proxy_secrets" {
     "client-id"     = local.oauth2_proxy_creds["client-id"]
     "client-secret" = local.oauth2_proxy_creds["client-secret"]
     "cookie-secret" = local.oauth2_proxy_creds["cookie-secret"]
+  }
+
+  type = "Opaque"
+}
+
+# ==============================================================================
+# Auth Service 전용 JWT 서명용 KMS 비대칭 키 (ECC_NIST_P256)
+# ==============================================================================
+resource "aws_kms_key" "jwt_sign_key" {
+  description              = "KMS Asymmetric Key for JWT signing in Auth Service"
+  key_usage                = "SIGN_VERIFY"
+  customer_master_key_spec = "ECC_NIST_P256"
+  deletion_window_in_days  = 7
+
+  tags = {
+    Environment = "prod"
+    ManagedBy   = "terraform"
+    Service     = "auth-service"
+  }
+}
+
+resource "aws_kms_alias" "jwt_sign_key" {
+  name          = "alias/auth-jwt-sign-key"
+  target_key_id = aws_kms_key.jwt_sign_key.key_id
+}
+
+# ==============================================================================
+# Auth Service IRSA 권한 추가 (KMS 서명 및 공개키 조회)
+# AWS 정책상 alias가 아닌 실제 KMS Key ARN만 Resource로 지원되므로 기존대로 유지
+# ==============================================================================
+resource "aws_iam_role_policy" "auth_kms_sign" {
+  name = "AuthKmsSignPolicy"
+  role = "auth-service-irsa"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Sign",
+          "kms:GetPublicKey",
+          "kms:DescribeKey"
+        ]
+        Resource = aws_kms_key.jwt_sign_key.arn
+      }
+    ]
+  })
+}
+
+# ==============================================================================
+# backend / dev 네임스페이스용 auth-secret 배포
+# ==============================================================================
+resource "kubernetes_secret_v1" "auth_secret" {
+  for_each = toset(local.target_namespaces)
+
+  depends_on = [
+    module.eks,
+    kubernetes_namespace_v1.backend,
+    kubernetes_namespace_v1.dev
+  ]
+
+  metadata {
+    name      = "auth-secret"
+    namespace = each.key
+  }
+
+  data = {
+    "KAKAO_CLIENT_SECRET" = "dummy-kakao-secret"
+    "NAVER_CLIENT_SECRET" = "dummy-naver-secret"
+  }
+
+  type = "Opaque"
+}
+
+# ==============================================================================
+# backend / dev 네임스페이스용 payment-secret 배포
+# ==============================================================================
+resource "kubernetes_secret_v1" "payment_secret" {
+  for_each = toset(local.target_namespaces)
+
+  depends_on = [
+    module.eks,
+    kubernetes_namespace_v1.backend,
+    kubernetes_namespace_v1.dev
+  ]
+
+  metadata {
+    name      = "payment-secret"
+    namespace = each.key
+  }
+
+  data = {
+    "TOSS_SECRET_KEY" = "test_sk_dummy_toss_secret_key"
   }
 
   type = "Opaque"
