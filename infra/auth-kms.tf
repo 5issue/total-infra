@@ -33,42 +33,6 @@ resource "aws_kms_alias" "auth_jwt_signing" {
   target_key_id = aws_kms_key.auth_jwt_signing.key_id
 }
 
-resource "aws_iam_policy" "auth_kms_sign" {
-  name        = "auth-service-kms-sign-policy"
-  description = "Allow auth-service to Sign/GetPublicKey on its dedicated JWT signing key only"
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "kms:Sign",
-          "kms:GetPublicKey",
-          "kms:DescribeKey"
-        ]
-        Resource = [aws_kms_key.auth_jwt_signing.arn]
-      }
-    ]
-  })
-}
-
-module "auth_kms_irsa" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version = "~> 5.0"
-
-  role_name = "auth-service-kms-signer-role"
-
-  oidc_providers = {
-    main = {
-      provider_arn               = module.eks.oidc_provider_arn
-      namespace_service_accounts = ["backend:auth-service-sa"]
-    }
-  }
-
-  role_policy_arns = {
-    kms_sign = aws_iam_policy.auth_kms_sign.arn
-  }
-}
 
 

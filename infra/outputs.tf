@@ -50,6 +50,6 @@ output "auth_jwt_kms_key_id" {
 }
 
 output "auth_kms_irsa_role_arn" {
-  value       = module.auth_kms_irsa.iam_role_arn
+  value       = module.workload_irsa["auth"].iam_role_arn
   description = "auth-service-sa ServiceAccount의 eks.amazonaws.com/role-arn 어노테이션에 넣을 값"
 }

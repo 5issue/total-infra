@@ -85,7 +85,8 @@ resource "aws_iam_role_policy" "auth_kms_jwt_policy" {
           "kms:DescribeKey",
           "kms:Verify"
         ]
-        Resource = "*"
+        # KMS 키 ARN을 지정해 최소 권한 원칙 충족
+        Resource = aws_kms_key.auth_jwt_signing.arn
       }
     ]
   })
