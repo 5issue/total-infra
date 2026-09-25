@@ -41,16 +41,17 @@ spec:
         # t 시리즈를 포함해도 무방하나, c/m 계열이 MSA 파드 실행에 더 안정적입니다.
         - key: karpenter.k8s.aws/instance-category
           operator: In
-          values: ["c", "m", "r", "t"]
+          values: ["m", "t", "r"]
+        # 3세대 초과 (t4g, m6g, m5, t3 등 안정적인 세대)
         - key: karpenter.k8s.aws/instance-generation
           operator: Gt
           values: ["2"]
         - key: karpenter.k8s.aws/instance-size
           operator: In
-          values: ["medium", "large"]
+          values: ["large"]
   limits:
-    cpu: "16"
-    memory: "32Gi"
+    cpu: "4"
+    memory: "16Gi"
   disruption:
     consolidationPolicy: WhenEmpty
     consolidateAfter: 30s

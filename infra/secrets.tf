@@ -456,30 +456,6 @@ resource "aws_kms_alias" "jwt_sign_key" {
 }
 
 # ==============================================================================
-# Auth Service IRSA 권한 추가 (KMS 서명 및 공개키 조회)
-# AWS 정책상 alias가 아닌 실제 KMS Key ARN만 Resource로 지원되므로 기존대로 유지
-# ==============================================================================
-resource "aws_iam_role_policy" "auth_kms_sign" {
-  name = "AuthKmsSignPolicy"
-  role = "auth-service-irsa"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "kms:Sign",
-          "kms:GetPublicKey",
-          "kms:DescribeKey"
-        ]
-        Resource = aws_kms_key.jwt_sign_key.arn
-      }
-    ]
-  })
-}
-
-# ==============================================================================
 # backend / dev 네임스페이스용 auth-secret 배포
 # ==============================================================================
 resource "kubernetes_secret_v1" "auth_secret" {
