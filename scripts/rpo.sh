@@ -1,7 +1,7 @@
 # 타깃 엔드포인트 (보내주신 Ingress의 실제 도메인과 서비스 경로)
 ENDPOINT="https://dev.cloudyim.store"
 TOTAL_FAIL=0
-TOTAL_REQ=180 # MNG 180초, Karpenter 120초
+TOTAL_REQ=120 # MNG 180초, Karpenter 120초
 
 echo ">>> [RPO 측정 시작] 1초 간격으로 트래픽 요청 전송 중..."
 

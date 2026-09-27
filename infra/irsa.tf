@@ -27,20 +27,20 @@ module "vpc_cni_irsa" {
 # ==============================================================================
 
 locals {
-  # 서비스 목록 및 네임스페이스 매핑
+  # 서비스 목록 및 네임스페이스/SA 매핑
   app_services = {
     # Backend Services
-    auth    = { namespace = "backend", sa_name = "auth-sa" }
-    order   = { namespace = "backend", sa_name = "order-sa" }
-    payment = { namespace = "backend", sa_name = "payment-sa" }
-    product = { namespace = "backend", sa_name = "product-sa" }
-    user    = { namespace = "backend", sa_name = "user-sa" }
-    oms     = { namespace = "backend", sa_name = "oms-sa" }
-    scm     = { namespace = "backend", sa_name = "scm-sa" }
-    wms     = { namespace = "backend", sa_name = "wms-sa" }
+    auth    = { namespaces = ["backend", "dev"], sa_name = "auth-sa" }
+    order   = { namespaces = ["backend", "dev"], sa_name = "order-sa" }
+    payment = { namespaces = ["backend", "dev"], sa_name = "payment-sa" }
+    product = { namespaces = ["backend", "dev"], sa_name = "product-sa" }
+    user    = { namespaces = ["backend", "dev"], sa_name = "user-sa" }
+    oms     = { namespaces = ["backend", "dev"], sa_name = "oms-sa" }
+    scm     = { namespaces = ["backend", "dev"], sa_name = "scm-sa" }
+    wms     = { namespaces = ["backend", "dev"], sa_name = "wms-sa" }
 
     # AI Service
-    ai      = { namespace = "backend", sa_name = "ai-sa" }
+    ai      = { namespaces = ["backend", "dev"], sa_name = "ai-sa" }
   }
 }
 
@@ -56,7 +56,7 @@ module "workload_irsa" {
   oidc_providers = {
     main = {
       provider_arn               = module.eks.oidc_provider_arn
-      namespace_service_accounts = ["${each.value.namespace}:${each.value.sa_name}"]
+      namespace_service_accounts = [for ns in each.value.namespaces : "${ns}:${each.value.sa_name}"]
     }
   }
 

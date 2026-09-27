@@ -50,8 +50,8 @@ spec:
           operator: In
           values: ["large"]
   limits:
-    cpu: "4"
-    memory: "16Gi"
+    cpu: "8"
+    memory: "32Gi"
   disruption:
-    consolidationPolicy: WhenEmpty
+    consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 30s

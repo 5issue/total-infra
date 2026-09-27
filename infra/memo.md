@@ -52,3 +52,15 @@ make rabbitmq-credential-publish
 make redis-credential-publish
 make redis-credential-verify
 ```
+
+### PostgreSQL/MySQL 시크릿 즉시 영구 삭제
+```bash
+aws secretsmanager delete-secret \
+  --secret-id "prod/total/dba-admin-postgresql" \
+  --force-delete-without-recovery \
+  --profile target-infra
+aws secretsmanager delete-secret \
+  --secret-id "prod/total/dba-admin-mysql" \
+  --force-delete-without-recovery \
+  --profile target-infra
+```
