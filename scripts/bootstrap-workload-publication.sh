@@ -30,6 +30,7 @@ trap cleanup EXIT
 
 run_as_publication_role() {
   env \
+    -u AWS_SECURITY_TOKEN \
     -u AWS_PROFILE \
     -u AWS_DEFAULT_PROFILE \
     -u AWS_ROLE_ARN \
@@ -193,10 +194,19 @@ export KUBECTL_CONTEXT="$kubectl_context"
 printf 'Starting workload publication bootstrap: environment=%s role=%s\n' \
   "$environment" "$publication_role_arn"
 
-printf 'Bootstrap step 1/2: RabbitMQ CA publication\n'
+printf 'Bootstrap step 1/5: RabbitMQ CA publication\n'
 run_as_publication_role "$dispatcher" "$environment" ca publish
 
-printf 'Bootstrap step 2/2: Redis credential publication\n'
+printf 'Bootstrap step 2/5: Redis credential publication\n'
 run_as_publication_role "$dispatcher" "$environment" redis-credential publish
+
+printf 'Bootstrap step 3/5: RabbitMQ Backend credential publication\n'
+run_as_publication_role "$dispatcher" "$environment" rabbitmq-credential publish
+
+printf 'Bootstrap step 4/5: RabbitMQ WMS credential publication\n'
+run_as_publication_role "$dispatcher" "$environment" wms-credential publish
+
+printf 'Bootstrap step 5/5: RabbitMQ OMS credential publication\n'
+run_as_publication_role "$dispatcher" "$environment" oms-credential publish
 
 printf 'Workload publication bootstrap completed: environment=%s\n' "$environment"
