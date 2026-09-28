@@ -21,7 +21,7 @@ locals {
     "kurly-wms",
     "kurly-scm",
 
-    "kurly-moco-mysql"
+    "kurly-moco-mysql" # 추가
   ]
 }
 
