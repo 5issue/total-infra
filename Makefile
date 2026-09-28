@@ -31,6 +31,7 @@ endef
 	base-plan base base-destroy \
 	init plan apply destroy \
 	workload-publication workload-publication-bootstrap \
+	rabbitmq-credentials-check rabbitmq-credentials-initialize \
 	rabbitmq-credential-publish rabbitmq-credential-verify \
 	rabbitmq-wms-credential-publish rabbitmq-wms-credential-verify \
 	rabbitmq-oms-credential-publish rabbitmq-oms-credential-verify \
@@ -171,28 +172,36 @@ workload-publication-bootstrap:
 # ----------------------------------------------------------------
 # 7. Workload credential publication (개별 운영 작업)
 # ----------------------------------------------------------------
+rabbitmq-credentials-check:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) \
+		./scripts/initialize-rabbitmq-credentials.sh check all
+
+rabbitmq-credentials-initialize:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) \
+		./scripts/initialize-rabbitmq-credentials.sh initialize all
+
 rabbitmq-credential-publish:
-	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" \
 		./scripts/publish-rabbitmq-credentials.sh publish
 
 rabbitmq-credential-verify:
-	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" \
 		./scripts/publish-rabbitmq-credentials.sh verify
 
 rabbitmq-wms-credential-publish:
-	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" \
 		./scripts/publish-rabbitmq-credentials.sh publish wms
 
 rabbitmq-wms-credential-verify:
-	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" \
 		./scripts/publish-rabbitmq-credentials.sh verify wms
 
 rabbitmq-oms-credential-publish:
-	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" \
 		./scripts/publish-rabbitmq-credentials.sh publish oms
 
 rabbitmq-oms-credential-verify:
-	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" \
 		./scripts/publish-rabbitmq-credentials.sh verify oms
 
 redis-credential-publish:
@@ -203,23 +212,11 @@ redis-credential-verify:
 	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
 		./scripts/publish-redis-credentials.sh verify
 
-# publish-all-credentials:
-# 	@echo "==> [1/4] Bootstrapping workload publication environment..."
-# 	@$(MAKE) workload-publication-bootstrap ENV="$(or $(ENV),production)" KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" TOTAL_K8S_DIR="$(TOTAL_K8S_DIR)"
+publish-all-credentials:
+	@echo "==> [1/2] Publishing and verifying all workload credentials with the publication role..."
+	@$(MAKE) workload-publication-bootstrap ENV="$(or $(ENV),production)" KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" TOTAL_K8S_DIR="$(TOTAL_K8S_DIR)"
 
-# 	@echo "==> [2/4] Publishing and verifying RabbitMQ credentials..."
-# 	@$(MAKE) rabbitmq-credential-publish
-# 	@$(MAKE) rabbitmq-credential-verify
-# 	@$(MAKE) rabbitmq-wms-credential-publish
-# 	@$(MAKE) rabbitmq-wms-credential-verify
-# 	@$(MAKE) rabbitmq-oms-credential-publish
-# 	@$(MAKE) rabbitmq-oms-credential-verify
-
-# 	@echo "==> [3/4] Publishing and verifying Redis credentials..."
-# 	@$(MAKE) redis-credential-publish
-# 	@$(MAKE) redis-credential-verify
-
-# 	@echo "==> [4/4] All workload credentials successfully published and verified!"
+	@echo "==> [2/2] All workload credentials successfully published and verified!"
 
 # ----------------------------------------------------------------
 # 8. 전체 인프라 안전 파기

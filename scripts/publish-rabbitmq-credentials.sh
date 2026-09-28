@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+set +x
 umask 077
 
 # 이 스크립트는 기존 AWSCURRENT SecretVersion만 조회·배포합니다.
@@ -14,9 +15,10 @@ readonly SOURCE_VERSION_ANNOTATION="total.io/source-version-id"
 readonly KUBECTL_REQUEST_TIMEOUT="20s"
 
 readonly IDENTITY="${2:-backend}"
-readonly AWS_PROFILE="${AWS_PROFILE:-target-infra}"
-readonly AWS_REGION="${AWS_REGION:-$EXPECTED_AWS_REGION}"
-readonly EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-$EXPECTED_EKS_CLUSTER_NAME}"
+aws_profile="${AWS_PROFILE:-target-infra}"
+aws_region="${AWS_REGION:-$EXPECTED_AWS_REGION}"
+eks_cluster_name="${EKS_CLUSTER_NAME:-$EXPECTED_EKS_CLUSTER_NAME}"
+declare -a aws_cli=(aws)
 
 SECRET_NAME=""
 KUBERNETES_SECRET_NAME=""
@@ -25,6 +27,7 @@ secret_payload=""
 source_version_id=""
 expected_eks_endpoint=""
 verified_version_id=""
+kubectl_context=""
 
 cleanup() {
   unset secret_payload
@@ -45,11 +48,30 @@ require_command() {
 }
 
 configure_aws_environment() {
-  # kubeconfig의 aws exec plugin도 지정된 profile만 사용하도록 ambient credential을 제거합니다.
-  unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
-  unset AWS_ROLE_ARN AWS_WEB_IDENTITY_TOKEN_FILE AWS_DEFAULT_PROFILE
-  export AWS_PROFILE AWS_REGION
-  export AWS_DEFAULT_REGION="$AWS_REGION"
+  local credential_count=0
+
+  [[ -n "${AWS_ACCESS_KEY_ID:-}" ]] && ((credential_count += 1))
+  [[ -n "${AWS_SECRET_ACCESS_KEY:-}" ]] && ((credential_count += 1))
+  [[ -n "${AWS_SESSION_TOKEN:-}" ]] && ((credential_count += 1))
+
+  if (( credential_count == 3 )); then
+    # Bootstrap이 전달한 publication Role session을 AWS CLI와 kube exec가 함께 사용합니다.
+    unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_SECURITY_TOKEN
+    unset AWS_ROLE_ARN AWS_WEB_IDENTITY_TOKEN_FILE
+    aws_profile=""
+  elif (( credential_count == 0 )); then
+    [[ -n "$aws_profile" ]] || \
+      die "AWS profile 또는 완전한 임시 session credential이 필요합니다."
+    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
+    unset AWS_ROLE_ARN AWS_WEB_IDENTITY_TOKEN_FILE AWS_DEFAULT_PROFILE
+    export AWS_PROFILE="$aws_profile"
+    aws_cli+=(--profile "$aws_profile")
+  else
+    die "불완전한 AWS session credential environment를 거부합니다."
+  fi
+
+  export AWS_REGION="$aws_region"
+  export AWS_DEFAULT_REGION="$aws_region"
   export AWS_PAGER=""
   export AWS_CLI_AUTO_PROMPT="off"
 }
@@ -80,9 +102,9 @@ configure_identity() {
 }
 
 validate_repository_contract() {
-  [[ "$AWS_REGION" == "$EXPECTED_AWS_REGION" ]] || \
+  [[ "$aws_region" == "$EXPECTED_AWS_REGION" ]] || \
     die "AWS_REGION이 repository 계약과 다릅니다."
-  [[ "$EKS_CLUSTER_NAME" == "$EXPECTED_EKS_CLUSTER_NAME" ]] || \
+  [[ "$eks_cluster_name" == "$EXPECTED_EKS_CLUSTER_NAME" ]] || \
     die "EKS_CLUSTER_NAME이 repository 계약과 다릅니다."
 }
 
@@ -90,12 +112,15 @@ aws_preflight() {
   local caller_identity caller_account caller_arn
   local cluster_identity cluster_arn
 
-  log "AWS preflight: profile=$AWS_PROFILE region=$AWS_REGION"
+  if [[ -n "$aws_profile" ]]; then
+    log "AWS preflight: profile=$aws_profile region=$aws_region"
+  else
+    log "AWS preflight: publication role session region=$aws_region"
+  fi
 
   if ! caller_identity="$(
-    aws sts get-caller-identity \
-      --profile "$AWS_PROFILE" \
-      --region "$AWS_REGION" \
+    "${aws_cli[@]}" sts get-caller-identity \
+      --region "$aws_region" \
       --query '[Account,Arn]' \
       --output text
   )"; then
@@ -109,10 +134,9 @@ aws_preflight() {
     die "AWS principal ARN을 확인할 수 없습니다."
 
   if ! cluster_identity="$(
-    aws eks describe-cluster \
-      --profile "$AWS_PROFILE" \
-      --region "$AWS_REGION" \
-      --name "$EKS_CLUSTER_NAME" \
+    "${aws_cli[@]}" eks describe-cluster \
+      --region "$aws_region" \
+      --name "$eks_cluster_name" \
       --query 'cluster.[arn,endpoint]' \
       --output text
   )"; then
@@ -132,21 +156,26 @@ kubernetes_preflight() {
   local current_context current_server kube_exec_command kube_exec_cluster
   local kube_exec_profile kube_exec_role kube_exec_region namespace
 
-  if ! current_context="$(kubectl config current-context 2>/dev/null)"; then
-    die "현재 kubeconfig context를 확인할 수 없습니다."
+  current_context="${KUBECTL_CONTEXT:-}"
+  if [[ -z "$current_context" ]] && \
+    ! current_context="$(kubectl config current-context 2>/dev/null)"; then
+    die "kubeconfig context를 확인할 수 없습니다. KUBECTL_CONTEXT를 지정하세요."
   fi
-  [[ -n "$current_context" ]] || die "현재 kubeconfig context가 비어 있습니다."
+  [[ -n "$current_context" ]] || die "kubeconfig context가 비어 있습니다."
+  [[ "$(kubectl config get-contexts "$current_context" -o name 2>/dev/null)" == "$current_context" ]] || \
+    die "KUBECTL_CONTEXT가 kubeconfig에 없습니다: $current_context"
+  kubectl_context="$current_context"
 
-  current_server="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
+  current_server="$(kubectl --context "$kubectl_context" config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
   [[ "$current_server" == "$expected_eks_endpoint" ]] || \
     die "현재 kubeconfig context가 대상 EKS endpoint와 일치하지 않습니다."
 
-  kube_exec_command="$(kubectl config view --minify -o jsonpath='{.users[0].user.exec.command}')"
+  kube_exec_command="$(kubectl --context "$kubectl_context" config view --minify -o jsonpath='{.users[0].user.exec.command}')"
   [[ "$(basename -- "$kube_exec_command")" == "aws" ]] || \
     die "현재 kubeconfig context가 AWS exec authentication을 사용하지 않습니다."
 
   kube_exec_cluster="$(
-    kubectl config view --minify -o json | jq -r '
+    kubectl --context "$kubectl_context" config view --minify -o json | jq -r '
       .users[0].user.exec.args as $args
       | ($args | index("--cluster-name")) as $index
       | if $index == null then "" else $args[$index + 1] end
@@ -156,7 +185,7 @@ kubernetes_preflight() {
     die "kubeconfig exec cluster가 repository 계약과 다릅니다."
 
   kube_exec_region="$(
-    kubectl config view --minify -o json | jq -r '
+    kubectl --context "$kubectl_context" config view --minify -o json | jq -r '
       .users[0].user.exec.args as $args
       | ($args | index("--region")) as $index
       | if $index == null then "" else $args[$index + 1] end
@@ -166,15 +195,15 @@ kubernetes_preflight() {
     die "kubeconfig exec region이 repository 계약과 다릅니다."
 
   kube_exec_profile="$(
-    kubectl config view --minify -o json | jq -r '
+    kubectl --context "$kubectl_context" config view --minify -o json | jq -r '
       [.users[0].user.exec.env[]? | select(.name == "AWS_PROFILE") | .value][0] // ""
     '
   )"
-  [[ -z "$kube_exec_profile" || "$kube_exec_profile" == "$AWS_PROFILE" ]] || \
+  [[ -z "$kube_exec_profile" || ( -n "$aws_profile" && "$kube_exec_profile" == "$aws_profile" ) ]] || \
     die "kubeconfig exec profile이 요청된 AWS profile과 다릅니다."
 
   kube_exec_role="$(
-    kubectl config view --minify -o json | jq -r '
+    kubectl --context "$kubectl_context" config view --minify -o json | jq -r '
       .users[0].user.exec.args as $args
       | ($args | index("--role-arn")) as $index
       | if $index == null then "" else $args[$index + 1] end
@@ -184,7 +213,8 @@ kubernetes_preflight() {
     die "repository에 정의되지 않은 kubeconfig role override가 있습니다."
 
   for namespace in messaging backend dev; do
-    if ! kubectl --request-timeout="$KUBECTL_REQUEST_TIMEOUT" get namespace "$namespace" -o name >/dev/null; then
+    if ! kubectl --context "$kubectl_context" --request-timeout="$KUBECTL_REQUEST_TIMEOUT" \
+      get namespace "$namespace" -o name >/dev/null; then
       die "Namespace가 없거나 접근할 수 없습니다: $namespace"
     fi
   done
@@ -196,13 +226,16 @@ resolve_secret_version() {
   local secret_metadata
 
   if ! secret_metadata="$(
-    aws secretsmanager describe-secret \
-      --profile "$AWS_PROFILE" \
-      --region "$AWS_REGION" \
+    "${aws_cli[@]}" secretsmanager describe-secret \
+      --region "$aws_region" \
       --secret-id "$SECRET_NAME" \
       --output json
   )"; then
     die "RabbitMQ Secrets Manager metadata 조회에 실패했습니다."
+  fi
+
+  if [[ "$(printf '%s' "$secret_metadata" | jq -r '.DeletedDate // empty')" != "" ]]; then
+    die "RabbitMQ Secrets Manager secret이 삭제 예약 상태입니다."
   fi
 
   if ! source_version_id="$(
@@ -218,9 +251,8 @@ resolve_secret_version() {
   unset secret_metadata
 
   if ! secret_payload="$(
-    aws secretsmanager get-secret-value \
-      --profile "$AWS_PROFILE" \
-      --region "$AWS_REGION" \
+    "${aws_cli[@]}" secretsmanager get-secret-value \
+      --region "$aws_region" \
       --secret-id "$SECRET_NAME" \
       --version-id "$source_version_id" \
       --query SecretString \
@@ -269,7 +301,7 @@ publish_secret() {
           password: (.password | @base64)
         }
       }
-    ' | kubectl --request-timeout="$KUBECTL_REQUEST_TIMEOUT" apply \
+    ' | kubectl --context "$kubectl_context" --request-timeout="$KUBECTL_REQUEST_TIMEOUT" apply \
       --server-side \
       --field-manager=rabbitmq-credential-publisher \
       -f - >/dev/null; then
@@ -285,7 +317,7 @@ verify_secret() {
   local summary secret_type source_secret source_version has_username has_password data_keys
 
   if ! summary="$(
-    kubectl --request-timeout="$KUBECTL_REQUEST_TIMEOUT" \
+    kubectl --context "$kubectl_context" --request-timeout="$KUBECTL_REQUEST_TIMEOUT" \
       get secret "$KUBERNETES_SECRET_NAME" \
       --namespace "$namespace" \
       -o json | jq -er \
@@ -336,19 +368,21 @@ publish() {
 verify() {
   local messaging_version backend_version dev_version
 
-  verify_secret messaging
+  resolve_secret_version
+
+  verify_secret messaging "$source_version_id"
   messaging_version="$verified_version_id"
 
-  verify_secret backend
+  verify_secret backend "$source_version_id"
   backend_version="$verified_version_id"
 
-  verify_secret dev
+  verify_secret dev "$source_version_id"
   dev_version="$verified_version_id"
 
   [[ "$messaging_version" == "$backend_version" && "$backend_version" == "$dev_version" ]] || \
     die "세 Namespace의 source-version-id가 일치하지 않습니다."
 
-  log "세 Namespace의 RabbitMQ Secret publication 상태가 일치합니다."
+  log "세 Namespace의 RabbitMQ Secret publication이 현재 AWSCURRENT VersionId와 일치합니다."
 }
 
 main() {
