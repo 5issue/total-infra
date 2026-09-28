@@ -26,6 +26,7 @@ docker buildx build \
   --no-cache \
   --build-arg NEXT_PUBLIC_API_URL=https://api.example.com \
   --build-arg NEXT_PUBLIC_APP_ENV=production \
+  --build-arg NEXT_PUBLIC_TOSS_CLIENT_KEY="test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq" \
   -t 596601390909.dkr.ecr.ap-northeast-2.amazonaws.com/kurly-frontend:latest \
   --push .
 ```
