@@ -57,10 +57,7 @@ resource "helm_release" "metrics_server" {
         "--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname",
         "--kubelet-use-node-status-port",
         "--metric-resolution=15s",
-        "--kubelet-insecure-tls"
-      ]
-
-      args = [
+        "--kubelet-insecure-tls",
         "--authorization-always-allow-paths=/livez,/readyz,/metrics"
       ]
 
