@@ -149,7 +149,7 @@ workload-publication: export WORKLOAD_PUBLICATION_TOTAL_K8S_DIR := $(value TOTAL
 workload-publication: export WORKLOAD_PUBLICATION_KUBECTL_CONTEXT := $(value KUBECTL_CONTEXT)
 workload-publication:
 	@if [[ -z "$${WORKLOAD_PUBLICATION_ENV:-}" || -z "$${WORKLOAD_PUBLICATION_COMPONENT:-}" || -z "$${WORKLOAD_PUBLICATION_PHASE:-}" ]]; then \
-	echo "Usage: make workload-publication ENV=production COMPONENT=<component> PHASE=<phase>"		exit 2; \
+	echo "Usage: make workload-publication ENV=production COMPONENT=<component> PHASE=<phase>" >&2; exit 2; \
 	fi
 	@TOTAL_K8S_DIR="$${WORKLOAD_PUBLICATION_TOTAL_K8S_DIR}" \
 		KUBECTL_CONTEXT="$${WORKLOAD_PUBLICATION_KUBECTL_CONTEXT}" \

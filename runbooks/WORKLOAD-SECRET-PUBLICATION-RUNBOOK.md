@@ -268,5 +268,5 @@ Fresh EKS에서는 publication 완료 후 `rabbitmq-provisioning-app`을 동기�
 
 - RabbitMQ CA publication: `total-k8s/workloads/rabbitmq/TRUST-PUBLICATION-RUNBOOK.md`
 - RabbitMQ CA rollover: `total-k8s/workloads/rabbitmq/CA-ROLLOVER-RUNBOOK.md`
-- RabbitMQ Application Identity provisioning: `total-k8s/workloads/rabbitmq/CREDENTIAL-PROVISIONING-RUNBOOK.md`
-- Redis credential publication: `total-k8s/workloads/redis/CREDENTIAL-PUBLICATION-RUNBOOK.md`
+- RabbitMQ Application Identity 및 연결 계약: `total-k8s/workloads/rabbitmq/README.md`
+- Redis credential 및 연결 계약: `total-k8s/workloads/redis/README.md`
