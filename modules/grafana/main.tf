@@ -42,6 +42,11 @@ resource "helm_release" "kube_prometheus_stack" {
           "nodes=[eks.amazonaws.com/capacityType,karpenter.sh/capacity-type]"
         ]
       }
+      prometheus = {
+        prometheusSpec = {
+          enableRemoteWriteReceiver = true
+        }
+      }
       grafana = {
         enabled       = true
         adminPassword = "admin1234"
