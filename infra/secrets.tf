@@ -473,8 +473,8 @@ resource "kubernetes_secret_v1" "auth_secret" {
   }
 
   data = {
-    "KAKAO_CLIENT_SECRET" = "dummy-kakao-secret"
-    "NAVER_CLIENT_SECRET" = "dummy-naver-secret"
+    "KAKAO_CLIENT_SECRET" = "W9VF8KbSojSALpdzWoV2zY1fPO4lgEpd"
+    "NAVER_CLIENT_SECRET" = "erzf8Hq382"
   }
 
   type = "Opaque"
