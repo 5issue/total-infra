@@ -13,6 +13,9 @@ spec:
   securityGroupSelectorTerms:
     - tags:
         karpenter.sh/discovery: "${cluster_name}"
+  # 파드 최대 개수 110개로 확장
+  kubelet:
+    maxPods: 110
   tags:
     Name: "karpenter-spot"
     Environment: "production"
@@ -55,3 +58,5 @@ spec:
   disruption:
     consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 30s
+    budgets:
+      - nodes: "1"    # 한 번에 1대씩 정리 허용

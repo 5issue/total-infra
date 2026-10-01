@@ -12,7 +12,17 @@ resource "aws_cloudfront_origin_request_policy" "alb_origin_policy" {
   headers_config {
     header_behavior = "whitelist"
     headers {
-      items = ["Host", "User-Agent", "Referer", "Accept", "Accept-Language"]
+      items = [
+        "Host",
+        "Authorization",                  # 인증 헤더
+        "User-Agent",
+        "Referer",
+        "Accept",
+        "Accept-Language",
+        "Origin",                         # CORS 요청 식별용
+        "Access-Control-Request-Headers", # CORS Preflight용
+        "Access-Control-Request-Method"   # CORS Preflight용
+      ]
     }
   }
 
