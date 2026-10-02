@@ -77,3 +77,26 @@ variable "moco_backup_bucket" {
   type        = string
   default     = "kurly-mysql-backup"
 }
+
+variable "enable_audit_logging" {
+  description = "점검용 CloudTrail 및 VPC Flow Logs 활성화 여부 (점검 시에만 true)"
+  type        = bool
+  default     = false
+}
+
+variable "llm_api_key" {
+  description = "OpenRouter LLM API Key for AI serving"
+  type        = string
+  sensitive   = true
+}
+
+variable "oauth2_proxy_github_client_id" {
+  description = "GitHub OAuth App Client ID for Swagger UI protection"
+  type        = string
+}
+
+variable "oauth2_proxy_github_client_secret" {
+  description = "GitHub OAuth App Client Secret for Swagger UI protection"
+  type        = string
+  sensitive   = true
+}

@@ -2,6 +2,11 @@ locals {
   workload_publication_role_name = "total-workload-publication"
   workload_publication_group     = "total:workload-publication"
   redis_credentials_secret_name  = "prod/total/redis-credentials"
+  rabbitmq_credentials_secret_names = toset([
+    "prod/total/rabbitmq-app-credentials",
+    "prod/total/rabbitmq-wms-credentials",
+    "prod/total/rabbitmq-oms-credentials",
+  ])
 }
 
 # target-infra is a team-managed external role. Reference it without taking
@@ -12,6 +17,11 @@ data "aws_iam_role" "target_infra" {
 
 data "aws_secretsmanager_secret" "redis_credentials" {
   name = local.redis_credentials_secret_name
+}
+
+data "aws_secretsmanager_secret" "rabbitmq_credentials" {
+  for_each = local.rabbitmq_credentials_secret_names
+  name     = each.value
 }
 
 resource "aws_iam_role" "workload_publication" {
@@ -62,6 +72,18 @@ resource "aws_iam_role_policy" "workload_publication" {
         Resource = data.aws_secretsmanager_secret.redis_credentials.arn
       },
       {
+        Sid    = "ReadRabbitMqCredentials"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [
+          for secret_name in sort(tolist(local.rabbitmq_credentials_secret_names)) :
+          data.aws_secretsmanager_secret.rabbitmq_credentials[secret_name].arn
+        ]
+      },
+      {
         Sid      = "DecryptRedisCredentialsViaSecretsManager"
         Effect   = "Allow"
         Action   = "kms:Decrypt"
@@ -72,6 +94,23 @@ resource "aws_iam_role_policy" "workload_publication" {
           }
           StringLike = {
             "kms:EncryptionContext:SecretARN" = data.aws_secretsmanager_secret.redis_credentials.arn
+          }
+        }
+      },
+      {
+        Sid      = "DecryptRabbitMqCredentialsViaSecretsManager"
+        Effect   = "Allow"
+        Action   = "kms:Decrypt"
+        Resource = data.aws_kms_alias.secrets_cmk.target_key_arn
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "secretsmanager.${var.aws_region}.amazonaws.com"
+          }
+          StringLike = {
+            "kms:EncryptionContext:SecretARN" = [
+              for secret_name in sort(tolist(local.rabbitmq_credentials_secret_names)) :
+              data.aws_secretsmanager_secret.rabbitmq_credentials[secret_name].arn
+            ]
           }
         }
       }

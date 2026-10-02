@@ -6,6 +6,7 @@ readonly SOURCE_SECRET="rabbitmq-ca-signing"
 readonly TARGET_CA_SCRIPT_RELATIVE="workloads/rabbitmq/scripts/publish-ca-trust.sh"
 readonly repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 readonly redis_credential_publisher="$repo_dir/scripts/publish-redis-credentials.sh"
+readonly rabbitmq_credential_publisher="$repo_dir/scripts/publish-rabbitmq-credentials.sh"
 
 usage() {
   cat >&2 <<'USAGE'
@@ -15,17 +16,16 @@ Supported:
   production ca publish
   production redis-credential publish
   production redis-credential verify
+  production rabbitmq-credential publish|verify
+  production wms-credential publish|verify
+  production oms-credential publish|verify
 
 Production CA requires:
   KUBECTL_CONTEXT=<EKS cluster ARN>
 
-Known but unsupported components:
-  rabbitmq-credential, wms-credential, oms-credential
-
 CA standalone preflight and verify phases are unsupported. The CA publisher
 performs source validation, publication, and target verification as one action.
-The Redis credential publisher performs its own preflight for both supported
-phases.
+Credential publishers perform their own preflight for both supported phases.
 USAGE
 }
 
@@ -78,6 +78,25 @@ case "$environment:$component:$phase" in
     printf 'Invoking the Redis credential publisher: environment=%s phase=%s\n' \
       "$environment" "$phase"
     exec "$redis_credential_publisher" "$phase"
+    ;;
+  production:rabbitmq-credential:publish|production:rabbitmq-credential:verify|\
+  production:wms-credential:publish|production:wms-credential:verify|\
+  production:oms-credential:publish|production:oms-credential:verify)
+    [[ -f "$rabbitmq_credential_publisher" ]] || \
+      fail "RabbitMQ credential publisher does not exist: $rabbitmq_credential_publisher"
+    [[ -x "$rabbitmq_credential_publisher" ]] || \
+      fail "RabbitMQ credential publisher is not executable: $rabbitmq_credential_publisher"
+
+    case "$component" in
+      rabbitmq-credential) identity="backend" ;;
+      wms-credential) identity="wms" ;;
+      oms-credential) identity="oms" ;;
+    esac
+    readonly identity
+
+    printf 'Invoking the RabbitMQ credential publisher: identity=%s phase=%s\n' \
+      "$identity" "$phase"
+    exec "$rabbitmq_credential_publisher" "$phase" "$identity"
     ;;
   *)
     fail "unsupported publication capability: environment=$environment component=$component phase=$phase"

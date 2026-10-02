@@ -26,7 +26,18 @@ define run-tf
 	$(2)
 endef
 
-.PHONY: iam-setup iam-plan iam iam-destroy base-plan base base-destroy init plan apply workload-publication workload-publication-bootstrap rabbitmq-credential-publish rabbitmq-credential-verify redis-credential-publish redis-credential-verify destroy scheduler-plan scheduler scheduler-destroy
+.PHONY: \
+	iam-setup iam-plan iam iam-destroy \
+	base-plan base base-destroy \
+	init plan apply destroy \
+	workload-publication workload-publication-bootstrap \
+	rabbitmq-credentials-check rabbitmq-credentials-initialize \
+	rabbitmq-credential-publish rabbitmq-credential-verify \
+	rabbitmq-wms-credential-publish rabbitmq-wms-credential-verify \
+	rabbitmq-oms-credential-publish rabbitmq-oms-credential-verify \
+	redis-credential-publish redis-credential-verify \
+	publish-all-credentials \
+	scheduler-plan scheduler scheduler-destroy
 
 # ----------------------------------------------------------------
 # 1. IAM 등록 (최초 1회 실행)
@@ -138,7 +149,7 @@ workload-publication: export WORKLOAD_PUBLICATION_TOTAL_K8S_DIR := $(value TOTAL
 workload-publication: export WORKLOAD_PUBLICATION_KUBECTL_CONTEXT := $(value KUBECTL_CONTEXT)
 workload-publication:
 	@if [[ -z "$${WORKLOAD_PUBLICATION_ENV:-}" || -z "$${WORKLOAD_PUBLICATION_COMPONENT:-}" || -z "$${WORKLOAD_PUBLICATION_PHASE:-}" ]]; then \
-	echo "Usage: make workload-publication ENV=production COMPONENT=<component> PHASE=<phase>"		exit 2; \
+	echo "Usage: make workload-publication ENV=production COMPONENT=<component> PHASE=<phase>" >&2; exit 2; \
 	fi
 	@TOTAL_K8S_DIR="$${WORKLOAD_PUBLICATION_TOTAL_K8S_DIR}" \
 		KUBECTL_CONTEXT="$${WORKLOAD_PUBLICATION_KUBECTL_CONTEXT}" \
@@ -161,13 +172,37 @@ workload-publication-bootstrap:
 # ----------------------------------------------------------------
 # 7. Workload credential publication (개별 운영 작업)
 # ----------------------------------------------------------------
+rabbitmq-credentials-check:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) \
+		./scripts/initialize-rabbitmq-credentials.sh check all
+
+rabbitmq-credentials-initialize:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) \
+		./scripts/initialize-rabbitmq-credentials.sh initialize all
+
 rabbitmq-credential-publish:
-	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" \
 		./scripts/publish-rabbitmq-credentials.sh publish
 
 rabbitmq-credential-verify:
-	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" \
 		./scripts/publish-rabbitmq-credentials.sh verify
+
+rabbitmq-wms-credential-publish:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" \
+		./scripts/publish-rabbitmq-credentials.sh publish wms
+
+rabbitmq-wms-credential-verify:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" \
+		./scripts/publish-rabbitmq-credentials.sh verify wms
+
+rabbitmq-oms-credential-publish:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" \
+		./scripts/publish-rabbitmq-credentials.sh publish oms
+
+rabbitmq-oms-credential-verify:
+	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" \
+		./scripts/publish-rabbitmq-credentials.sh verify oms
 
 redis-credential-publish:
 	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
@@ -177,6 +212,12 @@ redis-credential-verify:
 	@AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) EKS_CLUSTER_NAME=$(CLUSTER_NAME) \
 		./scripts/publish-redis-credentials.sh verify
 
+publish-all-credentials:
+	@echo "==> [1/2] Publishing and verifying all workload credentials with the publication role..."
+	@$(MAKE) workload-publication-bootstrap ENV="$(or $(ENV),production)" KUBECTL_CONTEXT="$(KUBECTL_CONTEXT)" TOTAL_K8S_DIR="$(TOTAL_K8S_DIR)"
+
+	@echo "==> [2/2] All workload credentials successfully published and verified!"
+
 # ----------------------------------------------------------------
 # 8. 전체 인프라 안전 파기
 # ----------------------------------------------------------------
@@ -185,22 +226,32 @@ destroy:
 	@echo " [1/5] K8s 리소스 선제 정리 및 Finalizer 해제"
 	@echo "=========================================================="
 	@export KUBECONFIG=~/.kube/config 2>/dev/null || true; \
-	kubectl delete ingress --all -A --timeout=30s 2>/dev/null || true; \
-	kubectl delete targetgroupbindings --all -A --timeout=30s 2>/dev/null || true; \
-	kubectl delete nodepools --all --timeout=30s 2>/dev/null || true; \
-	kubectl delete nodeclaims --all --timeout=30s 2>/dev/null || true; \
 	\
-	echo "CRD 리소스 finalizer 강제 제거..."; \
-	for TYPE in applications.argoproj.io rollouts.argoproj.io certificates.cert-manager.io ingress targetgroupbindings.elbv2.k8s.aws; do \
-		kubectl get $$TYPE -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null | \
-		while read NS NAME; do \
-			[ -z "$$NAME" ] || kubectl patch $$TYPE "$$NAME" -n "$$NS" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
-		done; \
+	echo "1. ALB 연동 Ingress 및 TargetGroupBinding finalizer 즉시 제거..."; \
+	kubectl get ingress -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null | \
+	while read -r NS NAME; do \
+		[ -n "$$NAME" ] && kubectl patch ingress "$$NAME" -n "$$NS" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
+	done; \
+	kubectl get targetgroupbindings -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null | \
+	while read -r NS NAME; do \
+		[ -n "$$NAME" ] && kubectl patch targetgroupbinding "$$NAME" -n "$$NS" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
 	done; \
 	\
-	echo "커스텀 네임스페이스 finalizer 선제 해제..."; \
-	for NS in $$(kubectl get ns --no-headers 2>/dev/null | awk '{print $$1}' | grep -E "^(frontend|backend|dev|argocd|prometheus|argo-rollouts|cert-manager)$$"); do \
-		echo "네임스페이스 finalizer 해제: $$NS"; \
+	echo "2. ArgoCD Application & Workload finalizer 즉시 제거..."; \
+	kubectl get applications.argoproj.io -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null | \
+	while read -r NS NAME; do \
+		[ -n "$$NAME" ] && kubectl patch application.argoproj.io "$$NAME" -n "$$NS" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
+	done; \
+	kubectl get pvc -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null | \
+	while read -r NS NAME; do \
+		[ -n "$$NAME" ] && kubectl patch pvc "$$NAME" -n "$$NS" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
+	done; \
+	kubectl delete nodepools --all --timeout=10s 2>/dev/null || true; \
+	kubectl delete nodeclaims --all --timeout=10s 2>/dev/null || true; \
+	\
+	echo "3. 비정상 네임스페이스 직접 정리(Finalize)..."; \
+	TARGET_NS=$$(kubectl get ns --no-headers 2>/dev/null | awk '{print $$1}' | grep -E "^(frontend|backend|dev|argocd|prometheus|argo-rollouts|cert-manager)$$"); \
+	for NS in $$TARGET_NS; do \
 		kubectl get ns "$$NS" -o json 2>/dev/null | jq '.spec.finalizers = []' | kubectl replace --raw "/api/v1/namespaces/$$NS/finalize" -f - 2>/dev/null || true; \
 	done
 
@@ -223,6 +274,8 @@ destroy:
 	@echo " [3/5] AWS ALB 및 Target Group 선제 소멸"
 	@echo "=========================================================="
 	@for alb in $$(export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 describe-load-balancers --region $(AWS_REGION) --query "LoadBalancers[?contains(LoadBalancerName, 'mainalbgroup') || contains(LoadBalancerName, 'k8s')].LoadBalancerArn" --output text 2>/dev/null); do \
+		echo "ALB 삭제 보호 강제 해제: $$alb"; \
+		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 modify-load-balancer-attributes --load-balancer-arn "$$alb" --attributes Key=deletion_protection.enabled,Value=false --region $(AWS_REGION) 2>/dev/null || true; \
 		echo "ALB 삭제: $$alb"; \
 		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 delete-load-balancer --load-balancer-arn "$$alb" --region $(AWS_REGION) 2>/dev/null || true; \
 		export AWS_PROFILE=$(AWS_PROFILE) && aws elbv2 wait load-balancers-deleted --load-balancer-arns "$$alb" --region $(AWS_REGION); \

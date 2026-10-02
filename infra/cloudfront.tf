@@ -12,7 +12,17 @@ resource "aws_cloudfront_origin_request_policy" "alb_origin_policy" {
   headers_config {
     header_behavior = "whitelist"
     headers {
-      items = ["Host", "User-Agent", "Referer", "Accept", "Accept-Language"]
+      items = [
+        "Host",
+        "Authorization",                  # 인증 헤더
+        "User-Agent",
+        "Referer",
+        "Accept",
+        "Accept-Language",
+        "Origin",                         # CORS 요청 식별용
+        "Access-Control-Request-Headers", # CORS Preflight용
+        "Access-Control-Request-Method"   # CORS Preflight용
+      ]
     }
   }
 
@@ -59,6 +69,9 @@ data "aws_acm_certificate" "cloudfront" {
 resource "aws_cloudfront_distribution" "main" {
   count = var.alb_dns_name != "" ? 1 : 0
 
+  # WAF 활성화 시 생성된 WAF ARN 주입
+  web_acl_id = var.enable_waf ? aws_wafv2_web_acl.alb_waf[0].arn : null
+  
   origin {
     domain_name = var.alb_dns_name
     origin_id   = "EKS-ALB-Origin"

@@ -19,7 +19,9 @@ locals {
     # 풀필먼트 도메인 (3개)
     "kurly-oms",
     "kurly-wms",
-    "kurly-scm"
+    "kurly-scm",
+
+    "kurly-moco-mysql" # 추가
   ]
 }
 

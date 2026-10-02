@@ -37,7 +37,11 @@ resource "helm_release" "kube_prometheus_stack" {
           KubeSchedulerDown         = true
         }
       }
-
+      "kube-state-metrics" = {
+        metricLabelsAllowlist = [
+          "nodes=[eks.amazonaws.com/capacityType,karpenter.sh/capacity-type]"
+        ]
+      }
       grafana = {
         enabled       = true
         adminPassword = "admin1234"

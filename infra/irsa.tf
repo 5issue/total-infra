@@ -21,3 +21,73 @@ module "vpc_cni_irsa" {
     ManagedBy   = "terraform"
   }
 }
+
+# ==============================================================================
+# [서비스별 IRSA] Backend & AI Services 전용 IAM Roles
+# ==============================================================================
+
+locals {
+  # 서비스 목록 및 네임스페이스/SA 매핑
+  app_services = {
+    # Backend Services
+    auth    = { namespaces = ["backend", "dev"], sa_name = "auth-sa" }
+    order   = { namespaces = ["backend", "dev"], sa_name = "order-sa" }
+    payment = { namespaces = ["backend", "dev"], sa_name = "payment-sa" }
+    product = { namespaces = ["backend", "dev"], sa_name = "product-sa" }
+    user    = { namespaces = ["backend", "dev"], sa_name = "user-sa" }
+    oms     = { namespaces = ["backend", "dev"], sa_name = "oms-sa" }
+    scm     = { namespaces = ["backend", "dev"], sa_name = "scm-sa" }
+    wms     = { namespaces = ["backend", "dev"], sa_name = "wms-sa" }
+
+    # AI Service
+    ai      = { namespaces = ["backend", "dev"], sa_name = "ai-sa" }
+  }
+}
+
+# 1. 공통 IRSA IAM Roles 일괄 생성
+module "workload_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "~> 5.0"
+
+  for_each = local.app_services
+
+  role_name = "${each.key}-service-irsa"
+
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = [for ns in each.value.namespaces : "${ns}:${each.value.sa_name}"]
+    }
+  }
+
+  tags = {
+    Service     = each.key
+    Environment = "prod"
+    ManagedBy   = "terraform"
+  }
+}
+
+# ==============================================================================
+# auth-service-irsa 전용 KMS 서명 및 공개키 조회 정책 연결
+# ==============================================================================
+resource "aws_iam_role_policy" "auth_kms_jwt_policy" {
+  name = "AuthKmsJwtSignPolicy"
+  role = module.workload_irsa["auth"].iam_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:GetPublicKey",
+          "kms:Sign",
+          "kms:DescribeKey",
+          "kms:Verify"
+        ]
+        # KMS 키 ARN을 지정해 최소 권한 원칙 충족
+        Resource = aws_kms_key.auth_jwt_signing.arn
+      }
+    ]
+  })
+}

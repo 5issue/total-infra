@@ -13,6 +13,9 @@ spec:
   securityGroupSelectorTerms:
     - tags:
         karpenter.sh/discovery: "${cluster_name}"
+  # 파드 최대 개수 110개로 확장
+  kubelet:
+    maxPods: 110
   tags:
     Name: "karpenter-spot"
     Environment: "production"
@@ -41,16 +44,19 @@ spec:
         # t 시리즈를 포함해도 무방하나, c/m 계열이 MSA 파드 실행에 더 안정적입니다.
         - key: karpenter.k8s.aws/instance-category
           operator: In
-          values: ["c", "m", "r", "t"]
+          values: ["m", "t", "r"]
+        # 3세대 초과 (t4g, m6g, m5, t3 등 안정적인 세대)
         - key: karpenter.k8s.aws/instance-generation
           operator: Gt
           values: ["2"]
         - key: karpenter.k8s.aws/instance-size
           operator: In
-          values: ["medium", "large"]
+          values: ["xlarge"]
   limits:
     cpu: "8"
-    memory: "16Gi"
+    memory: "32Gi"
   disruption:
-    consolidationPolicy: WhenEmpty
+    consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 30s
+    budgets:
+      - nodes: "1"    # 한 번에 1대씩 정리 허용

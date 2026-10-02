@@ -16,16 +16,21 @@ docker buildx inspect --bootstrap
 ### 프론트 빌드
 ```bash
 docker build \
-  --build-arg NEXT_PUBLIC_API_URL=https://api.example.com \
+  --build-arg NEXT_PUBLIC_API_URL=https://api.cloudyim.store \
+  --build-arg NEXT_PUBLIC_APP_URL=https://cloudyim.store \
   --build-arg NEXT_PUBLIC_APP_ENV=production \
+  --build-arg NEXT_PUBLIC_TOSS_CLIENT_KEY=test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq \
   -t 596601390909.dkr.ecr.ap-northeast-2.amazonaws.com/kurly-frontend:latest .
 
 ### 빌드 & push (멀티 아키텍처)
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   --no-cache \
-  --build-arg NEXT_PUBLIC_API_URL=https://api.example.com \
+  --build-arg NEXT_PUBLIC_API_URL=https://api.cloudyim.store \
+  --build-arg NEXT_PUBLIC_APP_URL=https://cloudyim.store \
   --build-arg NEXT_PUBLIC_APP_ENV=production \
+  --build-arg NEXT_SERVER_ACTIONS_ENCRYPTION_KEY="0da4VwoWw4edYPhEi7rjIhXzgbbxllRHc0XdhxZWs68=" \
+  --build-arg NEXT_PUBLIC_TOSS_CLIENT_KEY="test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq" \
   -t 596601390909.dkr.ecr.ap-northeast-2.amazonaws.com/kurly-frontend:latest \
   --push .
 ```
