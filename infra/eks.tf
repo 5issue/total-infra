@@ -80,6 +80,11 @@ module "eks" {
       principal_arn     = "arn:aws:iam::596601390909:user/be-user3"
       kubernetes_groups = ["backend-developers"]
     }
+
+    be_user4 = {
+      principal_arn     = "arn:aws:iam::596601390909:user/be-user4"
+      kubernetes_groups = ["ai-serving"] 
+    }
   }
 
   # =========================================================================
