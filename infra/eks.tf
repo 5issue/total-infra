@@ -122,12 +122,31 @@ module "eks" {
     eks-pod-identity-agent = { most_recent = true }
   }
 
+  # =========================================================================
+  # [U-28 대응] 22번 포트 제외 VPC 내부 인바운드 허용
+  # =========================================================================
   node_security_group_additional_rules = {
-    ingress_vpc_all = {
-      description = "Allow all traffic from VPC CIDR"
-      protocol    = "-1"
-      from_port   = 0
-      to_port     = 0
+    ingress_vpc_low = {
+      description = "Allow VPC TCP traffic below port 22"
+      protocol    = "tcp"
+      from_port   = 1
+      to_port     = 21
+      type        = "ingress"
+      cidr_blocks = [aws_vpc.main.cidr_block]
+    }
+    ingress_vpc_high = {
+      description = "Allow VPC TCP traffic above port 22"
+      protocol    = "tcp"
+      from_port   = 23
+      to_port     = 65535
+      type        = "ingress"
+      cidr_blocks = [aws_vpc.main.cidr_block]
+    }
+    ingress_vpc_udp = {
+      description = "Allow VPC UDP traffic for DNS and Pod overlays"
+      protocol    = "udp"
+      from_port   = 1
+      to_port     = 65535
       type        = "ingress"
       cidr_blocks = [aws_vpc.main.cidr_block]
     }
@@ -172,7 +191,7 @@ module "eks" {
             EOF
             systemctl reload sshd || systemctl restart sshd
 
-            # [U-02] 패스워드 최소 길이 및 복잡도 설정
+            # [U-02 & U-03] 비밀번호 복잡도, 만료 주기(90/1), 계정 잠금(5회/300초), 이전 이력(6회)
             cat << 'EOF' > /etc/security/pwquality.conf
             minlen = 8
             dcredit = -1
@@ -180,28 +199,73 @@ module "eks" {
             lcredit = -1
             ocredit = -1
             EOF
+            sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS   90/' /etc/login.defs || echo "PASS_MAX_DAYS   90" >> /etc/login.defs
+            sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS   1/' /etc/login.defs || echo "PASS_MIN_DAYS   1" >> /etc/login.defs
+            chage -M 90 -m 1 root || true
+            id ec2-user &>/dev/null && chage -M 90 -m 1 ec2-user || true
 
-            # [U-06] su 명령어는 허가된(wheel) 사용자만 사용
-            sed -i 's/^#\?auth\s\+required\s\+pam_wheel\.so\s\+use_uid/auth required pam_wheel.so use_uid/' /etc/pam.d/su
+            # 점검 가이드 기준 authselect 기능 활성화 및 faillock 설정
+            authselect enable-feature with-faillock || true
+            authselect enable-feature with-pwhistory || true
+            authselect apply-changes || true
+
+            sed -i 's/^#\?deny\s*=.*/deny = 5/' /etc/security/faillock.conf || echo "deny = 5" >> /etc/security/faillock.conf
+            sed -i 's/^#\?unlock_time\s*=.*/unlock_time = 600/' /etc/security/faillock.conf || echo "unlock_time = 600" >> /etc/security/faillock.conf
+            sed -i 's/^#\?remember\s*=.*/remember = 6/' /etc/security/pwhistory.conf || echo "remember = 6" >> /etc/security/pwhistory.conf
+
+            # [U-06] su 명령어 wheel 그룹 사용자 제한 및 wheel 그룹 등록
+            # 1. PAM 설정 활성화 (기존 라인이 없거나 주석이어도 확실하게 적용)
+            grep -q "pam_wheel.so use_uid" /etc/pam.d/su || echo "auth required pam_wheel.so use_uid" >> /etc/pam.d/su
+            sed -i 's/^#\s*\(auth\s\+required\s\+pam_wheel\.so\s\+use_uid\)/\1/' /etc/pam.d/su
+
+            # 2. su 허용 사용자를 wheel 그룹에 추가 (가이드라인 필수 요구사항)
+            usermod -aG wheel root
+            id ec2-user &>/dev/null && usermod -aG wheel ec2-user || true
+            
+            # [U-07] ec2-user 패스워드 잠금 (SSM Session Manager만 사용)
+            id ec2-user &>/dev/null && usermod -L -s /sbin/nologin ec2-user || true
 
             # [U-11] 시스템 계정(UID < 1000) 로그인 Shell 차단 (root 제외)
             awk -F: '($3 < 1000 && $1 != "root" && $7 !~ /(nologin|false)/) {print $1}' /etc/passwd | while read -r user; do
                 usermod -s /sbin/nologin "$user"
             done
 
-            # [U-12] 비활성 세션 자동 종료 (10분 = 600초 미입력 시 자동 로그아웃)
+            # [U-12] 세션 타임아웃 600초 (profile.d, profile, bashrc 반영)
             cat << 'EOF' > /etc/profile.d/timeout.sh
             export TMOUT=600
             readonly TMOUT
             EOF
             chmod 0644 /etc/profile.d/timeout.sh
+            echo "export TMOUT=600" >> /etc/profile
+            echo "readonly TMOUT" >> /etc/profile
 
-            # [U-13] 패스워드 안전 암호화 저장 (감사 기준 가이드 준수: SHA512)
+            # [U-13] SHA512 암호화 알고리즘
             if grep -q "^ENCRYPT_METHOD" /etc/login.defs; then
                 sed -i 's/^ENCRYPT_METHOD.*/ENCRYPT_METHOD SHA512/' /etc/login.defs
             else
                 echo "ENCRYPT_METHOD SHA512" >> /etc/login.defs
             fi
+
+            # =========================================================================
+            # [U-15] 무소유자 파일 조치 및 Kubelet 구조적 미조치 보안 대책
+            # =========================================================================
+            # 1. Kubelet 및 Pods 상위 디렉터리를 root 전용 700 권한으로 통제 (가이드 대책 ①)
+            mkdir -p /var/lib/kubelet/pods
+            chown root:root /var/lib/kubelet /var/lib/kubelet/pods
+            chmod 0700 /var/lib/kubelet /var/lib/kubelet/pods
+
+            # 2. 계정 생성/UID 위변조 탐지를 위한 auditd 감시 룰 추가 (가이드 대책 ③)
+            if command -v auditctl &>/dev/null; then
+                auditctl -w /etc/passwd -p wa -k user_modification || true
+            fi
+            mkdir -p /etc/audit/rules.d
+            echo "-w /etc/passwd -p wa -k user_modification" >> /etc/audit/rules.d/audit.rules || true
+
+            # 3. 파드 볼륨(/var/lib/kubelet)과 컨테이너 런타임을 "제외한" 시스템 영역의 무소유자 파일만 정리
+            find / -xdev \( -nouser -o -nogroup \) \
+              -not -path "/var/lib/kubelet/*" \
+              -not -path "/var/lib/containerd/*" \
+              -exec chown root:root {} + 2>/dev/null || true
 
             # [U-63] sudo 접근(/etc/sudoers) 권한 관리
             chown -R root:root /etc/sudoers /etc/sudoers.d
@@ -226,17 +290,35 @@ module "eks" {
             [ -f /etc/xinetd.conf ] && chmod 0600 /etc/xinetd.conf && chown root:root /etc/xinetd.conf || true
             [ -f /etc/rsyslog.conf ] && chmod 0640 /etc/rsyslog.conf && chown root:root /etc/rsyslog.conf || true
 
+            # [U-23] 불필요한 SUID/SGID 제거 (점검 지적 목록 반영)
+            chmod -s /usr/sbin/grub2-set-bootflag /usr/sbin/pam_timestamp_check /usr/bin/newgrp /usr/sbin/traceroute /usr/bin/pkexec 2>/dev/null || true
+
             # [U-27, U-29] 레거시 취약 파일 강제 삭제 (hosts.equiv, .rhosts, hosts.lpd)
             rm -f /etc/hosts.equiv /root/.rhosts /etc/hosts.lpd
 
             # [U-30] 기본 UMASK 022 명시 설정
-            sed -i -E 's/UMASK\s+[0-9]+/UMASK 022/' /etc/login.defs || true
+            sed -i -E 's/UMASK\s+[0-9]+/UMASK 022/' /etc/login.defs || echo "UMASK 022" >> /etc/login.defs
+            echo "umask 022" >> /etc/profile
+            echo "umask 022" >> /etc/bashrc
 
             # [U-34 ~ U-52] 불필요 및 취약 데몬/소켓 비활성화
             # AL2023에 미설치되어 있으나, 감사 통과 및 예방 차원의 즉시 비활성화
             systemctl disable --now finger.socket rsh.socket rlogin.socket rexec.socket \
               echo-stream.socket echo-dgram.socket discard-stream.socket discard-dgram.socket \
               daytime-stream.socket daytime-dgram.socket tftp.socket telnet.socket 2>/dev/null || true
+
+            # [U-37] crontab 및 at 명령어 권한 통제 (점검 가이드 전체 반영)
+            # 1. crontab 및 at 바이너리 750 설정 (SUID 자동 제거)
+            chmod 750 /usr/bin/crontab /usr/bin/at 2>/dev/null || true
+
+            # 2. cron 및 at 설정 파일 권한(640 이하) 및 소유자(root) 통제
+            [ -f /etc/crontab ] && chown root:root /etc/crontab && chmod 640 /etc/crontab || true
+            [ -d /etc/cron.d ] && chown -R root:root /etc/cron.d && chmod 750 /etc/cron.d && chmod 640 /etc/cron.d/* 2>/dev/null || true
+
+            # 3. cron.allow 생성 및 allow/deny 파일 권한 640 통제
+            touch /etc/cron.allow
+            chown root:root /etc/cron.allow /etc/cron.deny /etc/at.allow /etc/at.deny 2>/dev/null || true
+            chmod 640 /etc/cron.allow /etc/cron.deny /etc/at.allow /etc/at.deny 2>/dev/null || true
 
             # [U-48] SMTP 서비스 비활성화 및 VRFY 명령어 차단 설정 (U-48 대응)
             systemctl disable --now postfix sendmail 2>/dev/null || true
@@ -257,10 +339,48 @@ module "eks" {
                 usermod -s /sbin/nologin ftp || true
             fi
 
-            # [U-67] 주요 로그 파일 소유권 및 상세 권한 보강
-            find /var/log -type f -exec chmod go-w {} + 2>/dev/null || true
-            # 보안 감사 핵심 파일 640 적용
+            # [U-62] 로그인 접속 배너 경고문구 단독 설정
+            echo "Authorized users only. All activity may be monitored and reported." > /etc/issue
+            echo "Authorized users only. All activity may be monitored and reported." > /etc/issue.net
+            echo "Authorized users only. All activity may be monitored and reported." > /etc/motd
+
+            # [U-65] NTP 서버 AWS 내부 단일화 (추가됨)
+            if [ -f /etc/chrony.conf ]; then
+                sed -i 's/^server /#server /' /etc/chrony.conf
+                sed -i 's/^pool /#pool /' /etc/chrony.conf
+                grep -q "169.254.169.123" /etc/chrony.conf || echo "server 169.254.169.123 prefer iburst minpoll 4 maxpoll 4" >> /etc/chrony.conf
+                systemctl restart chronyd || true
+            fi
+
+            # =========================================================================
+            # [U-67] 주요 로그 파일 소유권 및 권한 관리 (점검 가이드 전체 반영)
+            # =========================================================================
+
+            # 1. wtmp, btmp, lastlog 파일 생성 및 권한 설정 (소유자: root)
+            touch /var/log/wtmp /var/log/btmp /var/log/lastlog
+            chown root:root /var/log/wtmp /var/log/btmp /var/log/lastlog
+            chmod 0644 /var/log/wtmp /var/log/lastlog
+            chmod 0600 /var/log/btmp
+
+            # 2. systemd-tmpfiles 권한 원복 방지 설정 (/etc/tmpfiles.d/ 재정의 - 필수 요구사항)
+            mkdir -p /etc/tmpfiles.d
+            cat << 'EOF' > /etc/tmpfiles.d/security-hardening.conf
+            f /var/log/wtmp 0644 root utmp -
+            f /var/log/btmp 0600 root utmp -
+            f /var/log/lastlog 0644 root root -
+            EOF
+            systemd-tmpfiles --create /etc/tmpfiles.d/security-hardening.conf || true
+
+            # 3. 보안 감사 핵심 파일 권한 (640 이하)
             chmod 0640 /var/log/messages /var/log/secure /var/log/audit/audit.log 2>/dev/null || true
+            find /var/log -type f -exec chmod go-w {} + 2>/dev/null || true
+
+            # 4. chrony 로그는 데몬 정상 로깅 유지를 위해 chrony 소유 유지 및 권한 강화 (640 이하)
+            if [ -d /var/log/chrony ]; then
+                chown -R chrony:chrony /var/log/chrony
+                chmod 0750 /var/log/chrony
+                find /var/log/chrony -type f -exec chmod 0640 {} + 2>/dev/null || true
+            fi
             
             echo "=== [Security Hardening] Complete ==="
           EOT
