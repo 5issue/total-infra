@@ -256,17 +256,18 @@ destroy:
 	done
 
 	@echo "=========================================================="
-	@echo " [2/5] Karpenter 스팟 노드 정리 및 인스턴스 종료 대기"
+	@echo " [2/5] 잔여 워커 노드 인스턴스 강제 정리 및 종료 대기"
 	@echo "=========================================================="
-	@SPOT_IDS=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 describe-instances \
+	@NODE_IDS=$$(export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 describe-instances \
 		--region $(AWS_REGION) \
-		--filters "Name=tag:karpenter.sh/nodepool,Values=*" "Name=instance-state-name,Values=pending,running,shutting-down,stopping,stopped" \
+		--filters "Name=instance-state-name,Values=pending,running,shutting-down,stopping,stopped" \
+		          "Name=tag-key,Values=karpenter.sh/nodepool,kubernetes.io/cluster/*,eks:nodegroup-name" \
 		--query "Reservations[*].Instances[*].InstanceId" \
 		--output text 2>/dev/null); \
-	if [ -n "$$SPOT_IDS" ]; then \
-		echo "스팟 인스턴스 종료 중: $$SPOT_IDS"; \
-		export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 terminate-instances --instance-ids $$SPOT_IDS --region $(AWS_REGION) 2>/dev/null || true; \
-		export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 wait instance-terminated --instance-ids $$SPOT_IDS --region $(AWS_REGION); \
+	if [ -n "$$NODE_IDS" ]; then \
+		echo "잔여 노드 인스턴스 종료: $$NODE_IDS"; \
+		export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 terminate-instances --instance-ids $$NODE_IDS --region $(AWS_REGION) 2>/dev/null || true; \
+		export AWS_PROFILE=$(AWS_PROFILE) && aws ec2 wait instance-terminated --instance-ids $$NODE_IDS --region $(AWS_REGION); \
 	fi
 	@sleep 5
 
